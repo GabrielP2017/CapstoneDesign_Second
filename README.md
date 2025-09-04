@@ -1,8 +1,11 @@
 ## 기술 스택·아키텍처(예시)
 
 BE: FastAPI + PostgreSQL/Timescale(롤업) + Celery/APS(스케줄), Requests/HTTPX + Pydantic.
+
 FE: React + Recharts/visx, Tailwind, SWR/React Query.
+
 데이터 소스: UPS/DHL/FedEx(공식 포털) + UNI-PASS 오픈API + (옵션) AfterShip/17TRACK 웹훅. 
+
 컴플라이언스: 개인식별 최소(송장·전화·이메일 저장 금지), 근거 링크 고정 노출(관세청·캐리어 공지).
 
 ## 팀 편성및 역할(예시)
