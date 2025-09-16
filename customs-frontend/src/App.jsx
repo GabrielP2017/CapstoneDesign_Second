@@ -2,6 +2,9 @@ import { useState } from 'react'
 import Sidebar from './components/Layout/Sidebar'
 import Header from './components/Layout/Header'
 import Dashboard from './components/DashBoard/Dashboard';
+import Overview from './components/DashBoard/Overview';
+import Reports from './components/DashBoard/Reports';
+import Insights from './components/DashBoard/CustomsPredictor';
 
 function App() {
 
@@ -12,22 +15,25 @@ function App() {
   dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 transition-all duration-500'>
     <div className='flex h-screen overflow-hidden'>
       <Sidebar 
-				collapsed = {sideBarCollapsed} 
-				onToggle = {() => setSideBarCollapsed(!sideBarCollapsed)}
-				currentPage = {currentPage}
-				onPageChange = {setCurrentPage}
-			/>
+			collapsed = {sideBarCollapsed} 
+			onToggle = {() => setSideBarCollapsed(!sideBarCollapsed)}
+			currentPage = {currentPage}
+			onPageChange = {setCurrentPage}
+		/>
       <div className='flex-1 flex flex-col overflow-hidden'>
         <Header 
-					sdiebarCollapsed={sideBarCollapsed} 
-					onToggleSidebar={() => setSideBarCollapsed(!sideBarCollapsed)} 
-				/>
+			sdiebarCollapsed={sideBarCollapsed} 
+			onToggleSidebar={() => setSideBarCollapsed(!sideBarCollapsed)} 
+		/>
 
-				<main className='flex-1 overflow-auto bg-transparent'>
-					<div className='p-6 space-y-6'>
-						{currentPage === "dashboard" && <Dashboard />}
-					</div>
-				</main>
+		<main className='flex-1 overflow-auto bg-transparent'>
+			<div className='p-6 space-y-6'>
+				{currentPage === "dashboard" && <Dashboard />}
+				{currentPage === "overview" && <Overview />}
+				{currentPage === "reports" && <Reports />}
+				{currentPage === "insights" && <Insights />}
+			</div>
+		</main>
       </div>
     </div>
   </div>
