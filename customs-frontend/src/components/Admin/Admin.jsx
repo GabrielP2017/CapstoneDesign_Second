@@ -75,7 +75,7 @@ export default function Admin() {
           className="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:opacity-90 disabled:opacity-50"
           disabled={loading}
         >
-          17TRACK에서 10개 가져와 DB 반영
+          17TRACK에서 화물정보 가져와 DB 반영
         </button>
 
         {loading && <Loader2 className="animate-spin ml-2" />}
