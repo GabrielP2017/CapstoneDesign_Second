@@ -1,40 +1,49 @@
 ﻿# python 3.10+
-# pip install fastapi uvicorn pydantic[dotenv] python-dateutil httpx
-"""
-17TRACK 웹훅 우선 + 폴링 보완 샘플 (통관 진행/지연/완료 필터 + 역행/누락/중복 방어)
-- v1/v2 API 엔드포인트 모두 지원 (기본: v1)
-- 웹훅 시그니처 검증: 본문 sign 또는 헤더 sign 모두 허용
-- 다국어 통관 패턴 강화(ko/en/zh/es/ja) + 과적합/오탐 감소 정규식 추가
-- 시간 역행/동시 타임스탬프 방어 + 중복 제거 + 누락 보정
-- 배치 등록/즉시 푸시/폴링 조회 + 재시도/지터/429-5xx 대처
-- 디버그/헬스/시뮬레이터 엔드포인트 추가
-
-[주요 앵커]
-  - [ANCHOR: HTTP_CLIENT]
-  - [ANCHOR: CONFIG]
-  - [ANCHOR: SIG_VERIFY]
-  - [ANCHOR: CUSTOMS_PATTERN]
-  - [ANCHOR: NORMALIZE]
-  - [ANCHOR: SUMMARY]
-  - [ANCHOR: POLLING]
-  - [ANCHOR: ROUTES]
-  - [ANCHOR: TEST_PAYLOAD]
-"""
+# pip install fastapi uvicorn pydantic[dotenv] python-dateutil httpx sqlalchemy
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request, HTTPException
+import os, json, asyncio
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+
+import httpx
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime, timezone
 from dateutil import parser as dtp
-from typing import List, Dict, Any, Optional, Tuple
-import hmac, hashlib, json, re, os, asyncio, random
-import httpx
-import uuid
-from dotenv import load_dotenv
 
-app = FastAPI(title="17TRACK Customs Filter – Enhanced")
+# --- DB ---
+from sqlalchemy import (
+    create_engine, Column, Integer, String, DateTime, ForeignKey, Text, func, Index
+)
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship, Session
+from sqlalchemy.exc import IntegrityError
+
+# =========================
+# 환경설정
+# =========================
+load_dotenv()
+# 상단 환경변수
+DEFAULT_CARRIER_CODE = int(os.getenv("DEFAULT_CARRIER_CODE", "3011"))  # China Post 기본 예시
+
+# 샘플 번호도 UPU 스타일로 바꿔주세요(가짜 DEMO → UPU CN)
+SAMPLE_10 = [
+    "RR123456785CN","RR123456796CN","RR123456807CN","RR123456818CN","RR123456829CN",
+    "RR123456830CN","RR123456841CN","RR123456852CN","RR123456863CN","RR123456874CN",
+]
+API_KEY = os.getenv("SEVENTEENTRACK_API_KEY", "")
+API_BASE_V24 = "https://api.17track.net/track/v2.4"
+
+if not API_KEY:
+    print("⚠️  SEVENTEENTRACK_API_KEY 가 비어 있습니다. .env에 설정하세요.")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, echo=False, future=True, connect_args=connect_args)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+Base = declarative_base()
 
 FRONTEND_ORIGINS = [
     origin.strip()
@@ -42,6 +51,9 @@ FRONTEND_ORIGINS = [
     if origin.strip()
 ]
 
+SAMPLE_10 = [f"TTK-DEMO-{i:04d}" for i in range(1, 11)]
+
+app = FastAPI(title="17TRACK – V2.4 minimal demo")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
@@ -49,18 +61,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# [ANCHOR: HTTP_CLIENT] 전역 HTTP 클라이언트 풀 (연결 재사용)
+# =========================
+# DB 모델
+# =========================
+class Tracking(Base):
+    __tablename__ = "trackings"
+    id = Column(Integer, primary_key=True)
+    number = Column(String(64), unique=True, index=True, nullable=False)
+    carrier = Column(String(32), default="")                # 숫자코드 문자열로 저장해도 ok
+    status = Column(String(32), default="NEW")              # NEW/TRACKING/CLEARED/EXCEPTION/UNKNOWN
+    last_event_at = Column(DateTime, nullable=True)
+    last_event_text = Column(Text, nullable=True)
+    source = Column(String(16), default="manual")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    events = relationship("TrackingEvent", back_populates="tracking", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_trackings_status", "status"),
+    )
+
+class TrackingEvent(Base):
+    __tablename__ = "tracking_events"
+    id = Column(Integer, primary_key=True)
+    tracking_id = Column(Integer, ForeignKey("trackings.id"), index=True, nullable=False)
+    event_time = Column(DateTime, nullable=True)
+    description = Column(Text, nullable=True)
+    raw = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    tracking = relationship("Tracking", back_populates="events")
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# =========================
+# 앱 수명주기 & HTTP 클라이언트
+# =========================
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
 
 @app.on_event("startup")
 async def _startup():
     global HTTP_CLIENT
-    # HTTP/2 활성화는 서버 호환성 문제시 False로 내리세요
-    try:
-        HTTP_CLIENT = httpx.AsyncClient(timeout=20.0, http2=True)
-    except ImportError:
-        print("\u26a0\ufe0f httpx[http2] 미설치. HTTP/1.1로 폴백합니다.")
-        HTTP_CLIENT = httpx.AsyncClient(timeout=20.0, http2=False)
+    Base.metadata.create_all(bind=engine)
+    HTTP_CLIENT = httpx.AsyncClient(timeout=25.0, http2=True)
 
 @app.on_event("shutdown")
 async def _shutdown():
@@ -69,350 +118,248 @@ async def _shutdown():
         await HTTP_CLIENT.aclose()
         HTTP_CLIENT = None
 
-load_dotenv()
-# [ANCHOR: CONFIG] 환경 설정 (v1 기본, v2.x도 허용)
-API_BASE = os.getenv("SEVENTEENTRACK_API_BASE", "https://api.17track.net/track/v1")
-API_KEY  = os.getenv("SEVENTEENTRACK_API_KEY")  # 대시보드의 Tracking API Key
-USER_AGENT = os.getenv("SEVENTEENTRACK_UA", "customs-filter-demo/1.0")
-
-if not API_KEY:
-    print("\u26a0\ufe0f  SEVENTEENTRACK_API_KEY 미설정. .env 또는 환경변수로 넣어주세요.")
-
-# 웹훅 공식 이벤트(v1 문서): TRACKING_UPDATED, TRACKING_STOPPED
-VALID_EVENTS = {"TRACKING_UPDATED", "TRACKING_STOPPED"}
-
-# =============== 시그니처 검증 ===============
-# [ANCHOR: SIG_VERIFY]
-class WebhookBody(BaseModel):
-    sign: Optional[str] = None
-    event: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-
-
-def _sha256_hex(s: str) -> str:
-    return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
-
-def verify_17track_signature(raw_body: bytes, headers: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
-    """17TRACK 서명 검증.
-    공식 규격(v1): sign/event/data를 본문에서 읽고 'event/data_json_compact/secret'를 이어붙여 SHA256.
-    일부 샘플 코드에선 헤더 'sign'를 쓰므로, 헤더 sign가 있으면 우선 사용.
-    실패 시 HTTP 401.
-    """
-    try:
-        body_str = raw_body.decode("utf-8")
-        obj = WebhookBody(**json.loads(body_str))
-    except Exception:
-        # 가끔 빈 바디로 테스트 푸시하는 경우가 있어 방어
-        raise HTTPException(status_code=400, detail="Malformed JSON body")
-
-    event = obj.event
-    data  = obj.data or {}
-
-    # 헤더/바디 sign 모두 지원
-    sign_hdr = headers.get("sign") or headers.get("Sign") or headers.get("X-17Track-Sign")
-    sign_body = obj.sign
-    sign = (sign_hdr or sign_body)
-    if not (event and sign):
-        raise HTTPException(status_code=401, detail="Missing sign/event")
-
-    # compact JSON 직렬화(키 순서/공백 고정)
-    data_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-    base = f"{event}/{data_str}/{API_KEY}"
-    expect = _sha256_hex(base)
-
-    if sign != expect:
-        raise HTTPException(status_code=401, detail="Signature mismatch")
-
-    return event, data
-
-# =============== 통관 패턴 ===============
-# [ANCHOR: CUSTOMS_PATTERN]
-# 오탐 방지를 위해 정보 수신(received info)과 완료(cleared)의 구분을 강화
-PATTERNS = {
-    "IN_PROGRESS": [
-        r"\b(customs|clearance)\b.*\b(in\s*progress|processing|underway|started)\b",
-        r"\b(awaiting|presented\s*to|arrived\s*at)\b.*\bcustoms\b",
-        r"통관\s*(진행|중|검토|검사\s*대기)",
-        r"清关(中|处理中)|已交海关|报关",
-        r"(aduana|despacho).*(progreso|trámite|iniciado)",
-        r"通関(手続き中|審査中|進行中)"
-    ],
-    "DELAY": [
-        r"\b(customs|clearance)\b.*\b(delay|hold|on\s*hold|awaiting\s*documents|info\s*required|documentation\s*required)\b",
-        r"held\s*by\s*customs|clearance\s*information\s*required",
-        r"통관\s*(지연|보류|서류\s*요청|추가\s*정보\s*요청)",
-        r"清关(延误|受阻|待资料)|海关(扣留|查验)",
-        r"(aduana).*(retraso|retenid[oa]|documentos)",
-        r"通関(保留|停止|書類\s*不備)"
-    ],
-    "CLEARED": [
-        # 'clearance information received' 같은 문구 오탐 방지(negative lookahead)
-        r"\b(customs|clearance)\b.*\b(released|cleared|completed|approved)\b(?!\s*information)",
-        r"released\s*from\s*customs",
-        r"통관\s*(완료|해제|통과)",
-        r"清关完成|放行|已放行",
-        r"(aduana).*(liberad[oa]|aprobado|completado)",
-        r"通関(許可|完了|解放)"
-    ],
-}
-COMPILED = {k: [re.compile(p, re.I) for p in v] for k, v in PATTERNS.items()}
-
-# =============== 유틸 ===============
-
-def _to_dt_utc(s: str) -> datetime:
-    dt = dtp.parse(s)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def _stage_from_text(text: str) -> Optional[str]:
-    if not text:
+# =========================
+# 유틸
+# =========================
+def _parse_dt(s: Optional[str]) -> Optional[datetime]:
+    if not s:
         return None
-    for stg, regs in COMPILED.items():
-        if any(r.search(text) for r in regs):
-            return stg
-    return None
-
-STAGE_PRIORITY = {"IN_PROGRESS": 0, "DELAY": 1, "CLEARED": 2}
-
-
-def _sort_key(ev: Dict[str, Any]):
-    # ts 같을 때 우선순위: 진행 < 지연 < 완료
-    return (ev["ts"], STAGE_PRIORITY.get(ev["stage"], 99))
-
-# =============== 정규화 ===============
-# [ANCHOR: NORMALIZE]
-
-def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    17TRACK track 오브젝트의 z* 배열(z0/z1/z2/z9…)에서
-    a(시각), z(설명)만 추출 → 통관 3단계만 남김 → 시간정렬 + 중복제거 + 역행 방어
-    """
-    events: List[Dict[str, Any]] = []
-
-    # z*, z0~z9 탐색
-    for k, v in (track or {}).items():
-        if isinstance(v, list) and (k.startswith("z") or k in {"z0", "z1", "z2", "z9"}):
-            for e in v:
-                ts, desc = e.get("a"), e.get("z")
-                stg = _stage_from_text((desc or "").strip())
-                if ts and stg:
-                    try:
-                        events.append({"ts": _to_dt_utc(ts), "stage": stg, "desc": desc})
-                    except Exception:
-                        # 파싱 실패 레코드 무시
-                        pass
-
-    # 정렬 + 중복 제거
-    events.sort(key=_sort_key)
-    seen, out = set(), []
-    for ev in events:
-        key = (ev["ts"].isoformat(), ev["stage"], (ev["desc"] or "")[:160])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(ev)
-
-    # 시간 역행 보정: CLEARED가 IN_PROGRESS보다 앞에 있으면 스왑(극단적 케이스)
-    first_in = next((e for e in out if e["stage"] == "IN_PROGRESS"), None)
-    first_clear = next((e for e in out if e["stage"] == "CLEARED"), None)
-    if first_clear and first_in and first_clear["ts"] < first_in["ts"]:
-        # 앞단에 누락된 진행 이벤트가 있었다고 보고, 정렬키 재조정
-        out.sort(key=_sort_key)
-
-    return out
-
-# =============== 요약 ===============
-# [ANCHOR: SUMMARY]
-
-def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """통관 요약: 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
-    first_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS"), None)
-    cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED"), None)
-    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY"]
-
-    # 누락 보정: 완료만 있고 진행이 없으면 최선의 앞 이벤트를 진행으로 간주
-    if cleared and not first_in and events:
-        first_in = events[0]["ts"]
-
-    duration_sec: Optional[int] = None
-    if first_in and cleared:
-        duration_sec = int((cleared - first_in).total_seconds())
-
-    return {
-        "status": "CLEARED" if cleared else ("IN_PROGRESS" if first_in else "UNKNOWN"),
-        "in_progress_at": first_in.isoformat() if first_in else None,
-        "cleared_at": cleared.isoformat() if cleared else None,
-        "has_delay": bool(delays),
-        "delays": delays,
-        "duration_sec": duration_sec,
-    }
-
-# =============== HTTP 호출 유틸 ===============
-# [ANCHOR: POLLING]
-
-async def _post_json(path: str, json_body: Any, max_retries: int = 5):
-    if not API_KEY:
-        raise RuntimeError("SEVENTEENTRACK_API_KEY not set")
-
-    url = f"{API_BASE.rstrip('/')}/{path.lstrip('/')}"
-    headers = {
-        "Content-Type": "application/json",
-        "17token": API_KEY,
-        "User-Agent": USER_AGENT,
-        "X-Request-Id": str(uuid.uuid4()),
-    }
-    base_backoff = 1.0
-
-    client = HTTP_CLIENT or httpx.AsyncClient(timeout=20.0, http2=True)
-    created_temp_client = HTTP_CLIENT is None
-
     try:
-        for attempt in range(max_retries):
-            try:
-                r = await client.post(url, headers=headers, json=json_body)
-            except httpx.TransportError:
-                sleep = min(base_backoff * (2 ** attempt), 60)
-                sleep *= (0.8 + 0.4 * random.random())  # 지터
-                await asyncio.sleep(sleep)
-                continue
+        dt = dtp.parse(s)
+        if dt.tzinfo:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
 
-            if r.status_code in (408, 425, 429, 502, 503, 504):
-                ra = r.headers.get("Retry-After")
-                try:
-                    sleep = float(ra) if ra else min(base_backoff * (2 ** attempt), 60)
-                except ValueError:
-                    sleep = min(base_backoff * (2 ** attempt), 60)
-                sleep *= (0.8 + 0.4 * random.random())
-                await asyncio.sleep(sleep)
-                continue
+def _map_status_v24(v24_status: Optional[str]) -> str:
+    """
+    V2.4 latest_status.status → 우리 DB의 간단 상태로 맵핑
+    """
+    if not v24_status:
+        return "UNKNOWN"
+    s = v24_status.lower()
+    if s in ("delivered",):
+        return "CLEARED"
+    if s in ("exception", "deliveryfailure", "expired"):
+        return "EXCEPTION"
+    if s in ("intransit", "inforeceived", "availableforpickup", "outfordelivery"):
+        return "TRACKING"
+    if s in ("notfound",):
+        return "UNKNOWN"
+    return "UNKNOWN"
 
-            # 200대 이외는 예외
-            r.raise_for_status()
-            return r.json()
+async def v24_post(path: str, body: Any) -> Dict[str, Any]:
+    """
+    V2.4는 모든 엔드포인트가 '배열' 또는 '객체' JSON 바디를 받는다.
+    성공이어도 code:0 + data.rejected / data.errors 가 있을 수 있으니 예외로 치지 않는다.
+    """
+    if not API_KEY:
+        raise HTTPException(status_code=400, detail="SEVENTEENTRACK_API_KEY not set")
+    url = f"{API_BASE_V24.rstrip('/')}/{path.lstrip('/')}"
+    headers = {
+        "17token": API_KEY,
+        "Content-Type": "application/json",
+    }
+    client = HTTP_CLIENT or httpx.AsyncClient(timeout=25.0, http2=True)
+    r = await client.post(url, headers=headers, json=body)
+    # 200 외엔 예외
+    if r.status_code >= 400:
+        try:
+            data = r.json()
+        except Exception:
+            data = {"raw": r.text}
+        raise HTTPException(status_code=r.status_code, detail=data)
+    try:
+        return r.json()
+    except Exception:
+        return {"raw": r.text}
 
-        raise RuntimeError(f"POST {url} failed after {max_retries} retries")
-    finally:
-        if created_temp_client:
-            await client.aclose()
+def _extract_v24_items(payload: Any) -> List[dict]:
+    """
+    V2.4 표준 응답에서 data.accepted 배열만 뽑아낸다.
+    """
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") or {}
+    items = data.get("accepted") or []
+    if isinstance(items, list):
+        return items
+    return []
 
+def upsert_from_v24_item(db: Session, item: Dict[str, Any]) -> None:
+    """
+    V2.4 gettrackinfo의 accepted[] 항목 1개를 DB에 반영
+    """
+    number = item.get("number")
+    if not number:
+        return
+    carrier_code = item.get("carrier")
+    track_info = item.get("track_info") or {}
 
-def _chunked(seq: List[str], size: int = 40):
-    for i in range(0, len(seq), size):
-        yield seq[i:i + size]
+    latest_status = (track_info.get("latest_status") or {}).get("status")
+    latest_event = track_info.get("latest_event") or {}
 
+    # 이벤트 텍스트: 번역문 우선 → 원문
+    desc_trans = (latest_event.get("description_translation") or {}).get("description")
+    desc_raw = latest_event.get("description")
+    last_text = desc_trans or desc_raw
 
-async def register_trackings(numbers: List[str]):
-    """운송장 배치 등록(요청당 최대 40개). 성공 시 최신 상태는 웹훅으로 푸시됨."""
-    results = []
-    for batch in _chunked(numbers, 40):
-        payload = [{"number": n} for n in batch]
-        res = await _post_json("register", payload)
-        results.append(res)
-        await asyncio.sleep(0.35)  # ≈ 3 req/s 보수적
-    return results
+    # 이벤트 시각: time_utc 우선 → time_iso
+    last_at = latest_event.get("time_utc") or latest_event.get("time_iso")
+    last_dt = _parse_dt(last_at)
 
+    tracking = db.query(Tracking).filter(Tracking.number == number).one_or_none()
+    if not tracking:
+        tracking = Tracking(number=number, source="api")
+        db.add(tracking)
+        db.flush()
 
-async def push_now(numbers: List[str]):
-    """등록된 운송장의 최신 상태 푸시 유도(최대 40개/요청)."""
-    payload = [{"number": n} for n in numbers[:40]]
-    return await _post_json("push", payload)
+    tracking.carrier = str(carrier_code or tracking.carrier or "")
+    tracking.last_event_text = last_text
+    tracking.last_event_at = last_dt
+    tracking.status = _map_status_v24(latest_status)
+    db.commit()
+    db.refresh(tracking)
 
+# =========================
+# 스키마 (응답용)
+# =========================
+class RegisterResp(BaseModel):
+    ok: bool
+    registered_numbers: List[str]
+    reg_raw: Any
+    via: str = "v2.4"
 
-async def get_trackinfo(numbers: List[str]):
-    """등록된 운송장의 상세 상태를 폴링 조회(최대 40개/요청)."""
-    payload = [{"number": n} for n in numbers[:40]]
-    return await _post_json("gettrackinfo", payload)
+class FetchResp(BaseModel):
+    ok: bool
+    queried: int
+    updated: int
+    numbers: List[str]
 
-
-# =============== 라우트 ===============
-# [ANCHOR: ROUTES]
-
+# =========================
+# 라우트
+# =========================
 @app.get("/health")
 async def health():
     return {"ok": True}
 
-
-@app.post("/webhooks/17track")
-async def webhook_17track(req: Request):
-    raw = await req.body()
-    event, data = verify_17track_signature(raw, dict(req.headers))
-
-    if event not in VALID_EVENTS:
-        # 공식 외 이벤트는 무시(호환을 위해 payload는 로깅/보관 권장)
-        return {"ok": True, "skipped": True, "reason": f"ignored event {event}"}
-
-    number = data.get("number")
-    track  = data.get("track") or {}
-    normalized = normalize_from_track(track)
-    summary    = summarize_customs(normalized)
-    return {
-        "ok": True,
-        "event": event,
-        "tracking_number": number,
-        "summary": summary,
-        "normalized_count": len(normalized),
-    }
-
-
-@app.get("/debug/normalize")
-async def debug_normalize(number: str):
-    """폴링으로 실데이터 가져와 같은 정규화/요약을 실행(웹훅 미구축 시 점검용)."""
-    payload = await get_trackinfo([number])
-    # API 응답 스키마 방어적으로 접근
-    tracks = payload if isinstance(payload, list) else payload.get("data") or payload.get("result") or []
-    track = None
-    for item in tracks:
-        if isinstance(item, dict) and (item.get("number") == number or item.get("no") == number):
-            track = item
-            break
-    normalized = normalize_from_track(track or {})
-    summary    = summarize_customs(normalized)
-    return {"ok": True, "tracking_number": number, "summary": summary, "normalized": normalized}
-
-
-# =============== 테스트 페이로드/시뮬레이터 ===============
-# [ANCHOR: TEST_PAYLOAD]
-
-@app.post("/test/webhook")
-async def test_webhook(event: str = "TRACKING_UPDATED", number: str = "RB123456789CN"):
+# /admin/register-17track-10 엔드포인트 내 파라미터 기본값 처리
+@app.post("/admin/register-17track-10", response_model=RegisterResp)
+async def admin_register_17track_10(
+    carrier_code: Optional[int] = Query(None, description="정수 Carrier 코드(예: China Post=3011)"),
+    lang: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+):
+    carrier = carrier_code if carrier_code is not None else DEFAULT_CARRIER_CODE
     """
-    로컬 시그니처 생성을 포함한 테스트 푸시 시뮬레이터.
-    curl 예:
-      curl -X POST http://localhost:8000/webhooks/17track \
-           -H 'Content-Type: application/json' \
-           -d @<(curl -s http://localhost:8000/test/webhook)
+    ① 샘플 10개를 V2.4 register로 등록.
+    - 페이로드는 반드시 '배열'이어야 함.
+    - carrier는 문자열이 아닌 '정수 코드'.
     """
-    # 3단계 이벤트 샘플
-    now = datetime.now(timezone.utc)
-    track = {
-        "z1": [
-            {"a": (now.replace(minute=0, second=0, microsecond=0).isoformat()), "z": "Presented to customs"},
-            {"a": (now.replace(minute=15, second=0, microsecond=0).isoformat()), "z": "Customs clearance information required"},
-            {"a": (now.replace(minute=45, second=0, microsecond=0).isoformat()), "z": "Released from customs"},
-        ]
-    }
-    data = {"number": number, "track": track}
+    payload = []
+    for n in SAMPLE_10:
+        one = {"number": n}
+        if carrier:
+            one["carrier"] = carrier
+        if lang: one["lang"] = lang
+        if tag:  one["tag"]  = tag
+        payload.append(one)
 
-    # compact 직렬화
-    data_str = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-    base = f"{event}/{data_str}/{API_KEY}"
-    sign = _sha256_hex(base)
+    reg = await v24_post("register", payload)
 
-    payload = {"sign": sign, "event": event, "data": data}
-    return payload
+    # DB에는 최소 NEW로 보장(목록 노출용)
+    db: Session = SessionLocal()
+    inserted, skipped = 0, 0
+    try:
+        for n in SAMPLE_10:
+            if db.query(Tracking).filter(Tracking.number == n).one_or_none():
+                skipped += 1
+                continue
+            db.add(Tracking(number=n, source="manual", status="NEW"))
+            inserted += 1
+        db.commit()
+    finally:
+        db.close()
 
+    return RegisterResp(ok=True, registered_numbers=SAMPLE_10, reg_raw=reg)
 
-# =========================
-# 데모 실행(옵션)
-# =========================
-async def main():
-    tracking_numbers = ["TRACKING_NUMBER_1", "INVALID_NUMBER_2", "TRACKING_NUMBER_3"]
-    print("\ud83d\ude80 register_trackings:", await register_trackings(tracking_numbers))
-    print("\u26a1 push_now:", await push_now(tracking_numbers[:2]))
-    print("\\ud83d\\udd0e get_trackinfo:", await get_trackinfo(tracking_numbers[:2]))
+@app.post("/admin/fetch-17track-10", response_model=FetchResp)
+async def admin_fetch_17track_10(db: Session = Depends(get_db)):
+    """
+    ② DB에서 최근순 10개(없으면 샘플 10개)를 가져와 V2.4 gettrackinfo 조회 → DB 반영
+    - 응답의 data.accepted[] 만 반영
+    - rejected는 상태 UNKNOWN으로 두거나 기존값 유지
+    """
+    rows = (
+        db.query(Tracking)
+          .order_by(Tracking.updated_at.desc().nullslast())
+          .limit(10)
+          .all()
+    )
+    numbers = [r.number for r in rows] or SAMPLE_10
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # V2.4: 배열로 보냄. carrier는 모르면 생략(자동탐색)
+    body = [{"number": n} for n in numbers]
+    res = await v24_post("gettrackinfo", body)
+
+    items = _extract_v24_items(res)
+    updated = 0
+    for it in items:
+        upsert_from_v24_item(db, it)
+        updated += 1
+
+    return FetchResp(ok=True, queried=len(numbers), updated=updated, numbers=numbers)
+
+@app.get("/admin/trackings")
+def admin_list_all_trackings(db: Session = Depends(get_db)):
+    """
+    ③ 우리 DB 전체 레코드 반환
+    """
+    rows = db.query(Tracking).order_by(Tracking.updated_at.desc().nullslast()).all()
+    return [
+        {
+            "number": r.number,
+            "status": r.status,
+            "last_event_at": r.last_event_at.isoformat() if r.last_event_at else None,
+            "last_event_text": r.last_event_text,
+            "source": r.source,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+        for r in rows
+    ]
+
+# (옵션) 개발 편의: 샘플을 NEW로 심어두고 싶을 때
+@app.post("/admin/seed-sample-10")
+def seed_sample_10(db: Session = Depends(get_db)):
+    inserted, skipped = 0, 0
+    for n in SAMPLE_10:
+        try:
+            db.add(Tracking(number=n, source="manual", status="NEW"))
+            db.commit()
+            inserted += 1
+        except IntegrityError:
+            db.rollback()
+            skipped += 1
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "count": inserted+skipped}
+
+@app.get("/user/trackings")
+def user_list_trackings(db: Session = Depends(get_db)):
+    """
+    일반 사용자: 최근 목록(최대 100)
+    """
+    rows = (
+        db.query(Tracking)
+          .order_by(Tracking.updated_at.desc().nullslast())
+          .limit(100)
+          .all()
+    )
+    return [
+        {
+            "number": r.number,
+            "status": r.status,
+            "last_event_at": r.last_event_at.isoformat() if r.last_event_at else None,
+            "last_event_text": r.last_event_text,
+        }
+        for r in rows
+    ]

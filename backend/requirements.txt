@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic[dotenv]
+python-dateutil
+httpx
+sqlalchemy
+alembic
+python-dotenv
