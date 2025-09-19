@@ -36,3 +36,18 @@ FE: React + Recharts/visx, Tailwind, SWR/React Query.
 | M7 | 베타·보안·성능           | 11/17–11/23 | 이메일/웹푸시 알림, 로그/PII 최소화, 캐시                  | PII 미저장(송장 해시), 알림 쿨다운, p95<300ms·에러율<1%                          |
 | M8 | 릴리스 버퍼/QA          | 11/24–11/30 | 회귀·접근성·문서 마감                                | 체계적 회귀표, 사용자 가이드/면책·근거 고정                                         |
 
+## 로컬 연동 실행 가이드
+
+1. 백엔드(FastAPI)
+   - `cd backend`
+   - 필요한 패키지 설치: `pip install -r requirements.txt` (또는 README 상단 명령 참고)
+   - 환경변수 설정: 최소 `SEVENTEENTRACK_API_KEY`, 필요 시 `FRONTEND_ORIGINS` (기본값 `http://localhost:5173`).
+   - 개발 서버 실행: `uvicorn 17web:app --reload --port 8000`
+
+2. 프론트엔드(Vite)
+   - `cd customs-frontend`
+   - 의존성 설치: `npm install`
+   - `npm run dev`로 개발 서버 실행 (기본 포트 5173)
+   - `.env`에 `VITE_API_BASE_URL=http://localhost:8000`를 설정하면 다른 포트/도메인에서도 활용 가능
+
+FastAPI 앱에는 CORS가 활성화되어 있으며, 프론트엔드의 `TrackingStatus` 카드에서 `/debug/normalize`와 `/test/webhook`을 직접 호출해 상태를 확인할 수 있습니다.
