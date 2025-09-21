@@ -22,7 +22,8 @@
 """
 
 from __future__ import annotations
-
+from pydantic import BaseModel
+from fastapi import Body
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -33,6 +34,19 @@ import hmac, hashlib, json, re, os, asyncio, random
 import httpx
 import uuid
 from dotenv import load_dotenv
+from sqlalchemy import (
+    create_engine,
+    Column,
+    Integer,
+    String,
+    DateTime,
+    Text,
+    func,
+    JSON as SAJSON,
+)
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.exc import SQLAlchemyError
+from contextlib import contextmanager
 
 app = FastAPI(title="17TRACK Customs Filter – Enhanced")
 
@@ -51,6 +65,43 @@ app.add_middleware(
 
 # [ANCHOR: HTTP_CLIENT] 전역 HTTP 클라이언트 풀 (연결 재사용)
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
+
+# DB 설정 (환경변수로 오버라이드 가능)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./shipments.db")
+# sqlite: check_same_thread=False for multithread with FastAPI
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {})
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+Base = declarative_base()
+
+class Shipment(Base):
+    __tablename__ = "shipments"
+    id = Column(Integer, primary_key=True, index=True)
+    tracking_number = Column(String(128), unique=True, index=True, nullable=False)
+    carrier = Column(String(80), nullable=True)           # 선택적: carrier code/name
+    last_status = Column(String(80), nullable=True)       # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
+    last_event = Column(Text, nullable=True)              # 마지막 설명(짧게)
+    normalized = Column(Text, nullable=True)              # JSON 문자열로 저장(필요시 SAJSON 사용)
+    normalized_count = Column(Integer, default=0)
+    any_events = Column(Integer, default=0)               # boolean-like 0/1
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# 테이블 생성
+Base.metadata.create_all(bind=engine)
+
+@contextmanager
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 
 @app.on_event("startup")
 async def _startup():
@@ -550,6 +601,242 @@ async def test_webhook(event: str = "TRACKING_UPDATED", number: str = "RB1234567
     payload = {"sign": sign, "event": event, "data": data}
     return payload
 
+
+
+def _serialize_normalized(ev_list):
+    try:
+        return json.dumps([{"ts": e["ts"].isoformat(), "stage": e["stage"], "desc": e.get("desc", "")} for e in ev_list], ensure_ascii=False)
+    except Exception:
+        # fallback
+        return json.dumps([], ensure_ascii=False)
+
+def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalized_events: List[Dict[str, Any]], any_events: bool = False, carrier: Optional[str] = None):
+    """
+    안전 업서트:
+      - 만약 기존 레코드가 있고 incoming cleared 시간이 기존보다 과거면 무시(역행 방어)
+      - normalized/events 는 문자열로 저장(간단히)
+    """
+    try:
+        obj = db.query(Shipment).filter(Shipment.tracking_number == str(tracking_number)).one_or_none()
+        normalized_json = _serialize_normalized(normalized_events)
+        now = datetime.now(timezone.utc)
+        incoming_status = summary.get("status")
+        incoming_cleared_at = summary.get("cleared_at")
+        incoming_in_progress_at = summary.get("in_progress_at")
+
+        if obj is None:
+            obj = Shipment(
+                tracking_number=str(tracking_number),
+                carrier=carrier,
+                last_status=incoming_status,
+                last_event=(normalized_events[-1]["desc"] if normalized_events else None),
+                normalized=normalized_json,
+                normalized_count=len(normalized_events),
+                any_events=1 if any_events else 0,
+            )
+            db.add(obj)
+            db.flush()
+            return obj
+
+        # 기존 레코드가 있다면 역행/중복 방어 로직
+        # 기존의 cleared_at 혹은 in_progress_at을 normalized에서 추출해 비교 (간단하게 문자열 검색)
+        try:
+            existing_norm = json.loads(obj.normalized or "[]")
+            existing_cleared = None
+            for e in existing_norm:
+                if e.get("stage") == "CLEARED":
+                    existing_cleared = e.get("ts")
+                    break
+        except Exception:
+            existing_cleared = None
+
+        # 만약 incoming cleared가 있고 existing_cleared가 더 최신이면, incoming를 무시 (역행 방어)
+        if incoming_cleared_at and existing_cleared:
+            try:
+                existing_dt = dtp.parse(existing_cleared)
+                incoming_dt = dtp.parse(incoming_cleared_at)
+                if incoming_dt < existing_dt:
+                    # 역행하므로 요약만 업데이트하지 않고 무시
+                    # 단, 상태가 더 상세하면 보완(예: existing UNKNOWN -> incoming CLEARED)
+                    if STAGE_PRIORITY.get(incoming_status, 99) > STAGE_PRIORITY.get(obj.last_status or "UNKNOWN", -1):
+                        obj.last_status = incoming_status
+                    # normalized는 더 긴 것이 있으면 교체하지 않음
+                    obj.any_events = int(any_events or obj.any_events)
+                    return obj
+            except Exception:
+                pass
+
+        # 일반 업서트: 더 최신 정보로 교체
+        obj.carrier = carrier or obj.carrier
+        obj.last_status = incoming_status or obj.last_status
+        obj.last_event = (normalized_events[-1]["desc"] if normalized_events else obj.last_event)
+        obj.normalized = normalized_json
+        obj.normalized_count = len(normalized_events)
+        obj.any_events = int(any_events or obj.any_events)
+        obj.updated_at = now
+        db.add(obj)
+        db.flush()
+        return obj
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise
+
+# ---------- END: 업서트 유틸 ----------
+
+
+# ---------- START: 관리자 엔드포인트들 (동기화 / 샘플 추가 / 수동 조회) ----------
+
+from fastapi import BackgroundTasks
+
+# ===== 파일에서 번호 읽어 대량 폴링 → DB 업서트 =====
+from fastapi import Query
+
+def _parse_numbers_str(s: str) -> List[str]:
+    import re
+    tokens = re.split(r"[,\n\r\t ]+", s.strip())
+    return [t for t in tokens if t]
+
+def _load_numbers_from_file(path: str) -> List[str]:
+    if not os.path.exists(path):
+        return []
+    try:
+        if path.lower().endswith(".json"):
+            with open(path, "r", encoding="utf-8") as f:
+                arr = json.load(f)
+            return [str(x).strip() for x in arr if str(x).strip()] if isinstance(arr, list) else []
+        else:
+            with open(path, "r", encoding="utf-8") as f:
+                return _parse_numbers_str(f.read())
+    except Exception:
+        return []
+
+async def _fetch_and_upsert_many(numbers: List[str], batch: int = 40) -> Dict[str, Any]:
+    numbers = [str(n).strip() for n in numbers if str(n).strip()]
+    if not numbers:
+        return {"ok": True, "synced": 0, "reason": "no numbers in file"}
+
+    total_synced, processed = 0, set()
+
+    for chunk in _chunked(numbers, batch):
+        try:
+            payload = await get_trackinfo(chunk)
+        except Exception:
+            payload = None
+
+        # 스키마 방어
+        tracks: List[Dict[str, Any]] = []
+        if isinstance(payload, list):
+            tracks = payload
+        elif isinstance(payload, dict):
+            data_obj = payload.get("data")
+            if isinstance(data_obj, dict):
+                buckets: List[Dict[str, Any]] = []
+                for key in ("accepted", "result", "list"):
+                    v = data_obj.get(key)
+                    if isinstance(v, list):
+                        buckets.extend(v)
+                tracks = buckets
+            elif isinstance(payload.get("result"), list) or isinstance(payload.get("list"), list):
+                tracks = payload.get("result") or payload.get("list") or []
+            elif payload.get("number"):
+                tracks = [payload]
+
+        # 업서트
+        with get_db() as db:
+            for item in tracks:
+                if not isinstance(item, dict):
+                    continue
+                num = item.get("number") or item.get("no") or item.get("tracking") or ""
+                if not num:
+                    continue
+                processed.add(str(num))
+                track_obj = item.get("track") or item.get("track_info") or item
+                normalized = normalize_from_track(track_obj or {})
+                summary = summarize_customs(normalized)
+                any_events = _count_raw_events(track_obj or {}) > 0
+                upsert_shipment(db, num, summary, normalized, any_events)
+                total_synced += 1
+
+        await asyncio.sleep(0.25 + random.random() * 0.2)
+
+    # 응답에 없었던 번호도 최소 행 생성
+
+    return {"ok": True, "requested": len(numbers), "synced": total_synced}
+
+@app.post("/admin/fetch-from-file")
+async def admin_fetch_from_file(
+    path: str = Query(None, description="파일 경로 (없으면 기본 파일들 자동 탐색)"),
+    batch: int = Query(40, ge=1, le=40),
+):
+    """
+    파일에서 번호 읽어 일괄 폴링→DB 저장.
+    - path 미지정: tracking_numbers.json → 없으면 tracking_numbers.txt 순으로 찾음.
+    - path 지정: 해당 경로(.json 또는 .txt)
+    """
+    candidates = [path] if path else ["tracking_numbers.json", "tracking_numbers.txt"]
+    numbers: List[str] = []
+    picked = None
+    for p in candidates:
+        if p and os.path.exists(p):
+            picked = p
+            numbers = _load_numbers_from_file(p)
+            break
+    if not numbers:
+        return {"ok": False, "error": "no numbers file found or empty", "tried": candidates}
+    res = await _fetch_and_upsert_many(numbers, batch=batch)
+    res["file"] = picked
+    return res
+
+def _parse_normalized_json(s: Optional[str]) -> list[dict]:
+    if not s:
+        return []
+    try:
+        v = json.loads(s)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+def _serialize_row(obj: Shipment) -> dict:
+    """DB Shipment -> 프론트 공통 포맷"""
+    norm = _parse_normalized_json(obj.normalized)
+    last_ev_desc = (norm[-1].get("desc") if norm else None)
+    last_ev_ts   = (norm[-1].get("ts")   if norm else None)
+
+    # 화면 공통 스키마
+    return {
+        "number": obj.tracking_number,
+        "status": (obj.last_status or "UNKNOWN").upper(),
+        "last_event_text": obj.last_event or last_ev_desc or "",
+        "last_event_at": obj.updated_at.isoformat() if getattr(obj, "updated_at", None) else last_ev_ts,
+        "source": "17TRACK" if (obj.any_events or 0) else "DB",
+        # 참고용(프론트에서 쓰면 편한 필드들)
+        "carrier": obj.carrier,
+        "normalized_count": obj.normalized_count,
+    }
+
+# ======= 목록 엔드포인트들 =======
+
+@app.get("/admin/shipments")
+def admin_shipments():
+    """관리자: DB의 모든 운송장 최신순"""
+    with get_db() as db:
+        rows = (
+            db.query(Shipment)
+              .order_by(Shipment.updated_at.desc(), Shipment.created_at.desc())
+              .all()
+        )
+        return [_serialize_row(x) for x in rows]
+
+@app.get("/admin/list-shipments")
+def admin_list_shipments():
+    """레거시 호환(같은 응답)"""
+    return admin_shipments()
+
+@app.get("/user/trackings")
+def user_trackings():
+    """사용자: DB의 모든 운송장 목록 (같은 포맷)"""
+    return admin_shipments()
 
 # =========================
 # 데모 실행(옵션)
