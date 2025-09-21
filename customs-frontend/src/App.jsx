@@ -5,8 +5,7 @@ import Dashboard from "./components/DashBoard/Dashboard";
 import Overview from "./components/DashBoard/Overview";
 import Reports from "./components/DashBoard/Reports";
 import Insights from "./components/DashBoard/CustomsPredictor";
-import AdminShipment from "./components/Admin/AdminShipment";
-import MyItems from "./components/MyItems/MyItems";
+import AdminShipments from "./components/Admin/AdminShipments";
 function App() {
   const [sideBarCollapsed, setSideBarCollapsed] = useState(false);
   const [currentPage, setCurrentPage] = useState("dashboard");
@@ -33,8 +32,7 @@ function App() {
               {currentPage === "reports" && <Reports />}
               {currentPage === "insights" && <Insights />}
 
-              {currentPage === "admin" && <AdminShipment />}
-              {currentPage === "myitems" && <MyItems />}
+              {currentPage === "admin.shipments" && <AdminShipments />}
             </div>
           </main>
         </div>

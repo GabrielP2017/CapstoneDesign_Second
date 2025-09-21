@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 // ✅ 환경변수: true면 활성, 그 외(false/미설정) 비활성
 const ENABLE_REGISTER_10 = (import.meta.env?.VITE_ENABLE_REGISTER_10 ?? "false").toString().toLowerCase() === "true";
 
-export default function AdminShipment() {
+export default function AdminShipments() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
 
