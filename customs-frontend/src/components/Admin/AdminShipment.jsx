@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 // ✅ 환경변수: true면 활성, 그 외(false/미설정) 비활성
 const ENABLE_REGISTER_10 = (import.meta.env?.VITE_ENABLE_REGISTER_10 ?? "false").toString().toLowerCase() === "true";
 
-export default function Admin() {
+export default function AdminShipment() {
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
 
@@ -60,15 +60,6 @@ export default function Admin() {
         {/* <button onClick={onSeed} className="px-4 py-2 rounded-xl bg-slate-900 text-white hover:opacity-90">
           DB에 샘플 10개(NEW)
         </button> */}
-
-        <button
-          onClick={onRegister17}
-          className="px-4 py-2 rounded-xl bg-amber-600 text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={!ENABLE_REGISTER_10 || loading}
-          title={ENABLE_REGISTER_10 ? "17TRACK에 샘플 10개 등록" : "환경설정에서 비활성화됨 (VITE_ENABLE_REGISTER_10=false)"}
-        >
-          17TRACK에 샘플 10개 등록
-        </button>
 
         <button
           onClick={onFetch}

@@ -5,7 +5,7 @@ import Dashboard from "./components/DashBoard/Dashboard";
 import Overview from "./components/DashBoard/Overview";
 import Reports from "./components/DashBoard/Reports";
 import Insights from "./components/DashBoard/CustomsPredictor";
-import Admin from "./components/Admin/Admin";
+import AdminShipment from "./components/Admin/AdminShipment";
 import MyItems from "./components/MyItems/MyItems";
 function App() {
   const [sideBarCollapsed, setSideBarCollapsed] = useState(false);
@@ -33,7 +33,7 @@ function App() {
               {currentPage === "reports" && <Reports />}
               {currentPage === "insights" && <Insights />}
 
-              {currentPage === "admin" && <Admin />}
+              {currentPage === "admin" && <AdminShipment />}
               {currentPage === "myitems" && <MyItems />}
             </div>
           </main>

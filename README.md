@@ -39,14 +39,18 @@ FE: React + Recharts/visx, Tailwind, SWR/React Query.
 ## 로컬 연동 실행 가이드
 
 1. 백엔드(FastAPI)
+   - 터미널 gitbash 열기
    - `cd backend`
+   - `source ./venv/Scripts/Activate` ((venv)라고 뜨면 성공)
    - 필요한 패키지 설치: `pip install -r requirements.txt` (또는 README 상단 명령 참고)
-   - 환경변수 설정: 최소 `SEVENTEENTRACK_API_KEY`, 필요 시 `FRONTEND_ORIGINS` (기본값 `http://localhost:5173`).
+   - backend 폴더에 백엔드 .env 파일 없으면 넣기.
    - 개발 서버 실행: `uvicorn 17web:app --reload --port 8000`
 
 2. 프론트엔드(Vite)
+   - 터미널 gitbash 열기
    - `cd customs-frontend`
    - 의존성 설치: `npm install`
+   - customs-frontend 폴더에 프론트엔드 .env 파일 없으면 넣기.
    - `npm run dev`로 개발 서버 실행 (기본 포트 5173)
    - `.env`에 `VITE_API_BASE_URL=http://localhost:8000`를 설정하면 다른 포트/도메인에서도 활용 가능
 
@@ -57,3 +61,7 @@ FastAPI 앱에는 CORS가 활성화되어 있으며, 프론트엔드의 `Trackin
 백엔드 : uvicorn 17web:app --reload --port 8000
 
 프론트 : npm run dev
+
+## 로컬 배포 가이드
+1. 백엔드(FastAPI)
+   - 추가한 pip 라이브러리가 있다면 있다면 venv 활성화된 상태에서 `pip freeze > requirements.txt`
