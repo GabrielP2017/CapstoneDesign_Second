@@ -13,7 +13,7 @@
   - [ANCHOR: HTTP_CLIENT]
   - [ANCHOR: CONFIG]
   - [ANCHOR: SIG_VERIFY]
-  - [ANCHOR: CUSTOMS_PATTERN]
+  - [ANCHOR: CUSTOMS_PATTERN]   
   - [ANCHOR: NORMALIZE]
   - [ANCHOR: SUMMARY]
   - [ANCHOR: POLLING]
@@ -131,7 +131,7 @@ def verify_17track_signature(raw_body: bytes, headers: Dict[str, str]) -> Tuple[
 # 오탐 방지를 위해 정보 수신(received info)과 완료(cleared)의 구분을 강화
 PATTERNS = {
     "IN_PROGRESS": [
-        r"\b(customs|clearance)\b.*\b(in\s*progress|processing|underway|started)\b",
+        r"\b(customs|clearance)\b.*\b(in\s*progress|processing|underway|started|start(?:ed)?)\b",
         r"\b(awaiting|presented\s*to|arrived\s*at)\b.*\bcustoms\b",
         r"통관\s*(진행|중|검토|검사\s*대기)",
         r"清关(中|处理中)|已交海关|报关",
@@ -139,7 +139,7 @@ PATTERNS = {
         r"通関(手続き中|審査中|進行中)"
     ],
     "DELAY": [
-        r"\b(customs|clearance)\b.*\b(delay|hold|on\s*hold|awaiting\s*documents|info\s*required|documentation\s*required)\b",
+        r"\b(customs|clearance)\b.*\b(delay|on\s*hold|hold|awaiting\s*documents|info\s*required|documentation\s*required)\b",
         r"held\s*by\s*customs|clearance\s*information\s*required",
         r"통관\s*(지연|보류|서류\s*요청|추가\s*정보\s*요청)",
         r"清关(延误|受阻|待资料)|海关(扣留|查验)",
@@ -147,8 +147,7 @@ PATTERNS = {
         r"通関(保留|停止|書類\s*不備)"
     ],
     "CLEARED": [
-        # 'clearance information received' 같은 문구 오탐 방지(negative lookahead)
-        r"\b(customs|clearance)\b.*\b(released|cleared|completed|approved)\b(?!\s*information)",
+        r"\b(customs|clearance)\b.*\b(released|cleared|complete(?:d)?|approved)\b(?!\s*information)",
         r"released\s*from\s*customs",
         r"통관\s*(완료|해제|통과)",
         r"清关完成|放行|已放行",
@@ -159,6 +158,56 @@ PATTERNS = {
 COMPILED = {k: [re.compile(p, re.I) for p in v] for k, v in PATTERNS.items()}
 
 # =============== 유틸 ===============
+
+def _ti_view(track: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    track가 루트(dict)일 수도 있고, track_info(dict) 자체일 수도 있다.
+    - track_info 징후가 보이면 그대로 반환
+    - 아니면 track.get("track_info")를 반환
+    """
+    if not track:
+        return {}
+    # track_info 자체일 때의 힌트 키들
+    if any(k in track for k in ("tracking", "latest_status", "latest_event", "milestone", "time_metrics")):
+        return track
+    # 루트일 때
+    return track.get("track_info") or {}
+
+def _count_raw_events(track: Dict[str, Any]) -> int:
+    if not track:
+        return 0
+    total = 0
+    # v1: z* 배열
+    for k, v in track.items():
+        if isinstance(v, list) and (k.startswith("z") or k in {"z0", "z1", "z2", "z9"}):
+            total += len(v)
+
+    # v2: track_info 또는 track_info 자체
+    ti = _ti_view(track)
+    providers = ((ti.get("tracking") or {}).get("providers") or [])
+    for p in providers:
+        total += len(p.get("events") or [])
+    if ti.get("latest_event"):
+        total += 1
+    return total
+
+def _parse_multi_time(ev: Dict[str, Any]) -> Optional[datetime]:
+    """
+    17TRACK v2 이벤트의 다양한 시간 필드를 UTC로 통일.
+    우선순위: time_iso → time_utc → (time_raw.date + time_raw.time + time_raw.timezone)
+    """
+    s = ev.get("time_iso") or ev.get("time_utc")
+    if not s:
+        tr = ev.get("time_raw") or {}
+        if tr.get("date") and tr.get("time"):
+            tz = tr.get("timezone")
+            s = f"{tr['date']}T{tr['time']}{tz or 'Z'}"
+    if not s:
+        return None
+    try:
+        return _to_dt_utc(s)
+    except Exception:
+        return None
 
 def _to_dt_utc(s: str) -> datetime:
     dt = dtp.parse(s)
@@ -183,27 +232,80 @@ def _sort_key(ev: Dict[str, Any]):
     return (ev["ts"], STAGE_PRIORITY.get(ev["stage"], 99))
 
 # =============== 정규화 ===============
-# [ANCHOR: NORMALIZE]
-
 def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    17TRACK track 오브젝트의 z* 배열(z0/z1/z2/z9…)에서
-    a(시각), z(설명)만 추출 → 통관 3단계만 남김 → 시간정렬 + 중복제거 + 역행 방어
+    v1: z0/z1/z2/z9의 {a, z}
+    v2: track_info.tracking.providers[].events의 {time_iso|time_utc|time_raw, description, sub_status}
+    를 하나의 통관 이벤트 타임라인으로 통합.
     """
     events: List[Dict[str, Any]] = []
 
-    # z*, z0~z9 탐색
+    # --- (A) v1 z* 경로 ---
     for k, v in (track or {}).items():
         if isinstance(v, list) and (k.startswith("z") or k in {"z0", "z1", "z2", "z9"}):
             for e in v:
-                ts, desc = e.get("a"), e.get("z")
-                stg = _stage_from_text((desc or "").strip())
-                if ts and stg:
+                ts_raw = e.get("a") or e.get("time") or e.get("time_iso")
+                desc = e.get("z") or e.get("description")
+                stg  = _stage_from_text((desc or "").strip())
+                if ts_raw and stg:
                     try:
-                        events.append({"ts": _to_dt_utc(ts), "stage": stg, "desc": desc})
+                        events.append({"ts": _to_dt_utc(ts_raw), "stage": stg, "desc": desc})
                     except Exception:
-                        # 파싱 실패 레코드 무시
                         pass
+
+    # --- (B) v2 providers[].events 경로 ---
+    ti = _ti_view(track)
+    providers = (((ti.get("tracking") or {}).get("providers")) or [])
+    for prov in providers:
+        for e in (prov.get("events") or []):
+            ts   = _parse_multi_time(e)
+            desc = (e.get("description") or "")
+            stg  = _stage_from_text(desc.strip())
+
+            # 1) v2 sub_status 보조 매핑
+            if not stg:
+                sub = (e.get("sub_status") or "")
+                if sub in {"InTransit_CustomsProcessing", "InTransit_Arrival"}:
+                    stg = "IN_PROGRESS"
+                elif sub in {"InTransit_CustomsReleased", "Delivered", "Delivered_Other"}:
+                    stg = "CLEARED"
+                elif sub.startswith("Exception"):
+                    stg = "DELAY"
+
+            # 2) v2 stage 직접 매핑 (예: Delivered)
+            if not stg:
+                stage_in_payload = (e.get("stage") or "").lower()
+                if stage_in_payload in {"delivered"}:
+                    stg = "CLEARED"
+
+            # ✅ 누락됐던 append 추가
+            if ts and stg:
+                events.append({"ts": ts, "stage": stg, "desc": desc})
+
+
+    # --- (C) v2 latest_event 보조 (혹시 providers가 비어도 커버) ---
+    le = ti.get("latest_event") or None
+    if le:
+        ts   = _parse_multi_time(le)
+        desc = (le.get("description") or "")
+        stg  = _stage_from_text(desc.strip())
+
+        if not stg:
+            sub = (le.get("sub_status") or "")
+            if sub in {"InTransit_CustomsProcessing", "InTransit_Arrival"}:
+                stg = "IN_PROGRESS"
+            elif sub in {"InTransit_CustomsReleased", "Delivered", "Delivered_Other"}:
+                stg = "CLEARED"
+            elif sub.startswith("Exception"):
+                stg = "DELAY"
+
+        if not stg:
+            stage_in_payload = (le.get("stage") or "").lower()
+            if stage_in_payload in {"delivered"}:
+                stg = "CLEARED"
+
+        if ts and stg:
+            events.append({"ts": ts, "stage": stg, "desc": desc})
 
     # 정렬 + 중복 제거
     events.sort(key=_sort_key)
@@ -215,11 +317,10 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
         seen.add(key)
         out.append(ev)
 
-    # 시간 역행 보정: CLEARED가 IN_PROGRESS보다 앞에 있으면 스왑(극단적 케이스)
+    # CLEARED가 진행보다 앞서는 역행 케이스 방어
     first_in = next((e for e in out if e["stage"] == "IN_PROGRESS"), None)
     first_clear = next((e for e in out if e["stage"] == "CLEARED"), None)
     if first_clear and first_in and first_clear["ts"] < first_in["ts"]:
-        # 앞단에 누락된 진행 이벤트가 있었다고 보고, 정렬키 재조정
         out.sort(key=_sort_key)
 
     return out
@@ -345,15 +446,21 @@ async def webhook_17track(req: Request):
         return {"ok": True, "skipped": True, "reason": f"ignored event {event}"}
 
     number = data.get("number")
-    track  = data.get("track") or {}
+    track  = data.get("track") or data.get("track_info") or data
     normalized = normalize_from_track(track)
     summary    = summarize_customs(normalized)
+
+    any_events = _count_raw_events(track) > 0
+    if summary.get("status") == "UNKNOWN" and any_events:
+        summary["status"] = "PRE_CUSTOMS"
+
     return {
         "ok": True,
         "event": event,
         "tracking_number": number,
         "summary": summary,
         "normalized_count": len(normalized),
+        "any_events": any_events,
     }
 
 
@@ -362,15 +469,54 @@ async def debug_normalize(number: str):
     """폴링으로 실데이터 가져와 같은 정규화/요약을 실행(웹훅 미구축 시 점검용)."""
     payload = await get_trackinfo([number])
     # API 응답 스키마 방어적으로 접근
-    tracks = payload if isinstance(payload, list) else payload.get("data") or payload.get("result") or []
-    track = None
+    # ✅ 다양한 스키마 방어: list | {data|result|list} | 단일 아이템
+    tracks: List[Dict[str, Any]] = []
+    if isinstance(payload, list):
+        tracks = payload
+    elif isinstance(payload, dict):
+        data_obj = payload.get("data")
+        if isinstance(data_obj, dict):
+            # v1 공통 래퍼: {"code":0,"data":{"accepted":[...], "rejected":[...]}}
+            buckets: List[Dict[str, Any]] = []
+            for key in ("accepted", "result", "list"):
+                v = data_obj.get(key)
+                if isinstance(v, list):
+                    buckets.extend(v)
+            tracks = buckets
+        elif isinstance(payload.get("result"), list) or isinstance(payload.get("list"), list):
+            tracks = payload.get("result") or payload.get("list") or []
+        elif payload.get("number"):
+            tracks = [payload]
+        else:
+            tracks = []
+
+    track_item: Optional[Dict[str, Any]] = None
     for item in tracks:
-        if isinstance(item, dict) and (item.get("number") == number or item.get("no") == number):
-            track = item
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("number") or item.get("no") or "") == str(number):
+            track_item = item
             break
+    # v1은 item["track"], v2는 item["track_info"]
+    track = None
+    if track_item:
+        track = track_item.get("track") or track_item.get("track_info") or track_item
+
     normalized = normalize_from_track(track or {})
     summary    = summarize_customs(normalized)
-    return {"ok": True, "tracking_number": number, "summary": summary, "normalized": normalized}
+
+    # ✅ 프런트가 쓰는 보조 신호(any_events) + PRE_CUSTOMS 보정
+    any_events = _count_raw_events(track or {}) > 0
+    if summary.get("status") == "UNKNOWN" and any_events:
+        summary["status"] = "PRE_CUSTOMS"
+
+    return {
+        "ok": True,
+        "tracking_number": number,
+        "summary": summary,
+        "normalized": normalized,
+        "any_events": any_events,
+    }
 
 
 # =============== 테스트 페이로드/시뮬레이터 ===============

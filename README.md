@@ -51,3 +51,9 @@ FE: React + Recharts/visx, Tailwind, SWR/React Query.
    - `.env`에 `VITE_API_BASE_URL=http://localhost:8000`를 설정하면 다른 포트/도메인에서도 활용 가능
 
 FastAPI 앱에는 CORS가 활성화되어 있으며, 프론트엔드의 `TrackingStatus` 카드에서 `/debug/normalize`와 `/test/webhook`을 직접 호출해 상태를 확인할 수 있습니다.
+
+---
+
+백엔드 : uvicorn 17web:app --reload --port 8000
+
+프론트 : npm run dev
