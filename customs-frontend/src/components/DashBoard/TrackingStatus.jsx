@@ -27,6 +27,15 @@ const STAGE_META = {
   CLEARED:     { label: '완료',  dot: 'bg-emerald-500' },
 };
 
+// ▼▼▼ [추가된 부분] 처리 타임라인 설명을 위한 번역 객체 ▼▼▼
+const TIMELINE_DESC_TRANSLATIONS = {
+  'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
+  'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
+  'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
+  'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
+  'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
+};
+
 function formatDate(isoString) {
   if (!isoString) return '정보 없음';
   try {
@@ -53,7 +62,7 @@ export default function TrackingStatus() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [summary, setSummary] = useState(null);
   const [events, setEvents] = useState([]);
-  const [anyEvents, setAnyEvents] = useState(false);   // ★ 원시 이벤트 유무 표시
+  const [anyEvents, setAnyEvents] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [health, setHealth] = useState({ state: 'checking', detail: null });
@@ -77,7 +86,7 @@ export default function TrackingStatus() {
       const data = await getNormalizedTracking(trimmed);
       setSummary(data?.summary || null);
       setEvents(Array.isArray(data?.normalized) ? data.normalized : []);
-      setAnyEvents(Boolean(data?.any_events));   // ★ 백엔드 any_events 반영
+      setAnyEvents(Boolean(data?.any_events));
     } catch (err) {
       setError(err.message || '조회 중 오류가 발생했어요.'); resetResult();
     } finally { setLoading(false); }
@@ -152,12 +161,10 @@ export default function TrackingStatus() {
         <div className='mt-6 space-y-4'>
           <div className='flex flex-wrap items-center gap-3'>
             <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${statusInfo.badge}`}>
-              {/* ★ 상태별 아이콘: 진행일 때 스피너 */}
               <StatusIcon className={`h-4 w-4 ${statusKey === 'IN_PROGRESS' ? 'animate-spin' : ''}`}/>
               {statusInfo.label}
             </span>
 
-            {/* ★ 보조 안내: PRE_CUSTOMS/UNKNOWN+any_events */}
             {anyEvents && statusKey === 'PRE_CUSTOMS' && (
               <span className='text-xs text-slate-500 dark:text-slate-400'>원시 운송 이벤트 존재 · 통관 구간 대기</span>
             )}
@@ -191,18 +198,23 @@ export default function TrackingStatus() {
               {events.length > 0 ? (
                 events.map((eventItem, index) => {
                   const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
+                  
+                  // ▼▼▼ [수정된 부분] 번역 로직 적용 ▼▼▼
+                  const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
+                  
                   return (
                     <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'>
                       <span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/>
                       <div className='flex-1'>
                         <p className='text-xs font-semibold text-slate-500 dark:text-slate-300'>{stage.label} · {formatDate(eventItem.ts)}</p>
-                        <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>{eventItem.desc || '설명 없음'}</p>
+                        <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>
+                          {translatedDesc || '설명 없음'}
+                        </p>
                       </div>
                     </li>
                   );
                 })
               ) : (
-                // ★ PRE_CUSTOMS/UNKNOWN 안내 문구
                 <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
                   {statusKey === 'PRE_CUSTOMS'
                     ? '통관 구간 전(입항/통관 이벤트 대기)'
