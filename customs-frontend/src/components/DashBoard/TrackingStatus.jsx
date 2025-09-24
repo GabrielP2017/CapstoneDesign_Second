@@ -27,7 +27,7 @@ const STAGE_META = {
   CLEARED:     { label: '완료',  dot: 'bg-emerald-500' },
 };
 
-// ▼▼▼ [추가된 부분] 처리 타임라인 설명을 위한 번역 객체 ▼▼▼
+// ▼▼▼ [추가된 부분] 타임라인 번역 객체 ▼▼▼
 const TIMELINE_DESC_TRANSLATIONS = {
   'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
   'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
@@ -35,6 +35,7 @@ const TIMELINE_DESC_TRANSLATIONS = {
   'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
   'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
 };
+// ▲▲▲ [추가된 부분] 여기까지 ▲▲▲
 
 function formatDate(isoString) {
   if (!isoString) return '정보 없음';
@@ -113,6 +114,7 @@ export default function TrackingStatus() {
 
   return (
     <div className='bg-white/80 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm'>
+      {/* ... (상단 UI 부분, 수정 없음) ... */}
       <div className='flex flex-col gap-2 mb-6'>
         <div className='flex items-center justify-between'>
           <div>
@@ -126,7 +128,6 @@ export default function TrackingStatus() {
           </div>
         </div>
       </div>
-
       <form onSubmit={handleSubmit} className='space-y-4'>
         <div className='flex flex-col gap-3 md:flex-row'>
           <label className='flex-1 block'>
@@ -164,14 +165,12 @@ export default function TrackingStatus() {
               <StatusIcon className={`h-4 w-4 ${statusKey === 'IN_PROGRESS' ? 'animate-spin' : ''}`}/>
               {statusInfo.label}
             </span>
-
             {anyEvents && statusKey === 'PRE_CUSTOMS' && (
               <span className='text-xs text-slate-500 dark:text-slate-400'>원시 운송 이벤트 존재 · 통관 구간 대기</span>
             )}
             {!anyEvents && statusKey === 'UNKNOWN' && (
               <span className='text-xs text-slate-500 dark:text-slate-400'>원시 이벤트 없음 · 번호/캐리어 확인 필요</span>
             )}
-
             <div className='flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400'>
               <Clock4 className='h-4 w-4'/> 소요 시간: {formatDuration(typeof summary?.duration_sec === 'string' ? parseInt(summary.duration_sec, 10) : summary?.duration_sec)}
             </div>
@@ -191,39 +190,56 @@ export default function TrackingStatus() {
               <dd className='mt-1 text-sm text-slate-800 dark:text-slate-50'>{summary.has_delay ? `${summary.delays.length}건` : '지연 없음'}</dd>
             </div>
           </dl>
+          
+          <div className='flex flex-col gap-6 md:flex-row'>
+            <div className='flex-1 md:w-7/12 flex flex-col'>
+              <div className='space-y-3 flex flex-col flex-1'>
+                <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-200'>
+                  다른 UI 영역 (예: 원시 이벤트)
+                </h4>
+                <div className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200 flex-1'>
+                  <p>이곳에 새로운 UI 컴포넌트를 추가하세요.</p>
+                  <p className='mt-2 text-xs'>
+                    (예: API에서 받은 원본 이벤트 목록, 지도, 관련 상품 정보 등)
+                  </p>
+                </div>
+              </div>
+            </div>
 
-          <div className='space-y-3'>
-            <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-200'>처리 타임라인</h4>
-            <ul className='space-y-3'>
-              {events.length > 0 ? (
-                events.map((eventItem, index) => {
-                  const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
-                  
-                  // ▼▼▼ [수정된 부분] 번역 로직 적용 ▼▼▼
-                  const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
-                  
-                  return (
-                    <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'>
-                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/>
-                      <div className='flex-1'>
-                        <p className='text-xs font-semibold text-slate-500 dark:text-slate-300'>{stage.label} · {formatDate(eventItem.ts)}</p>
-                        <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>
-                          {translatedDesc || '설명 없음'}
-                        </p>
-                      </div>
+            <div className='flex-1 md:w-5/12'>
+              <div className='space-y-3'>
+                <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-200'>처리 타임라인</h4>
+                <ul className='space-y-3'>
+                  {events.length > 0 ? (
+                    events.map((eventItem, index) => {
+                      const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
+                      
+                      // ▼▼▼ [수정된 부분] 번역 로직 적용 ▼▼▼
+                      const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
+
+                      return (
+                        <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'>
+                          <span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/>
+                          <div className='flex-1'>
+                            <p className='text-xs font-semibold text-slate-500 dark:text-slate-300'>{stage.label} · {formatDate(eventItem.ts)}</p>
+                            <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>{translatedDesc || '설명 없음'}</p>
+                          </div>
+                        </li>
+                      );
+                      // ▲▲▲ [수정된 부분] 여기까지 ▲▲▲
+                    })
+                  ) : (
+                    <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
+                      {statusKey === 'PRE_CUSTOMS'
+                        ? '통관 구간 전(입항/통관 이벤트 대기)'
+                        : anyEvents
+                          ? '통관 키워드에 해당하는 이벤트가 아직 없습니다.'
+                          : '표시할 이벤트가 없습니다.'}
                     </li>
-                  );
-                })
-              ) : (
-                <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
-                  {statusKey === 'PRE_CUSTOMS'
-                    ? '통관 구간 전(입항/통관 이벤트 대기)'
-                    : anyEvents
-                      ? '통관 키워드에 해당하는 이벤트가 아직 없습니다.'
-                      : '표시할 이벤트가 없습니다.'}
-                </li>
-              )}
-            </ul>
+                  )}
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
       )}
