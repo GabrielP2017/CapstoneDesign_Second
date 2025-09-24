@@ -12,7 +12,7 @@ FE: React + Recharts/visx, Tailwind, SWR/React Query.
 
 - BE1(캐리어 연동 A): DHL/UPS 트래킹 API 연동·웹훅/폴링, 인증·쿼터·리트라이.
 
-- BE2(캐리어 연동 B): FedEx Track(폴링 10k/일) 연동, 이벤트 스키마 표준화. 
+- BE2(캐리어 연동 B): FedEx Track(폴링 10k/일) 연동, 이벤트 스키마 표준화.
 
 - BE3(데이터·통계): 이벤트→통관 구간(입항→통관진행→통관완료) 추출, 중간값/p90/N/95% CI(부트스트랩), 스파이크 탐지(7일 vs 4주).
 
