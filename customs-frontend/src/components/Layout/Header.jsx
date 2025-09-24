@@ -1,7 +1,34 @@
-import { Bell, ChevronDown, Filter, Menu, Plus, Search, Settings, Sun } from 'lucide-react'
-import React from 'react'
+import { Bell, ChevronDown, Filter, Menu, Plus, Search, Settings, Sun, Moon } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
 
 function Header({ sideBarCollapsed, onToggleSidebar }) {
+
+	// 다크 모드 상태를 관리합니다. localStorage에서 초기값을 가져옵니다.
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const savedMode = localStorage.getItem('darkMode');
+    if (savedMode !== null) {
+      return savedMode === 'true';
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  // isDarkMode 상태가 변경될 때마다 <html> 태그에 'dark' 클래스를 추가/제거하고,
+  // 선택된 모드를 localStorage에 저장합니다.
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('darkMode', 'true');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('darkMode', 'false');
+    }
+  }, [isDarkMode]);
+
+  // 다크 모드 상태를 토글하는 함수입니다.
+  const toggleDarkMode = () => {
+    setIsDarkMode(prevMode => !prevMode);
+  };
+
   return (
     <div className='bg-white/80 dark:bg-slate-900/80 backdrop:backdrop-blur-xl border-b
     border-slate-200/50 dark:border-slate-700/50 px-6 py-4'>
@@ -53,9 +80,12 @@ function Header({ sideBarCollapsed, onToggleSidebar }) {
           </button>
 
           {/* 토글 */}
-          <button className='p-2.5 rounded-xl text-slate-600 dark:text-slate-300
-          hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors'>
-            <Sun className='w-5 h-5' />
+          <button 
+						onClick={toggleDarkMode}
+						className='p-2.5 rounded-xl text-slate-600 dark:text-slate-300
+          	hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors'
+					>
+						{isDarkMode ? <Sun className='w-5 h-5' /> : <Moon className='w-5 h-5' />}
           </button>
 
           {/* 알림 */}

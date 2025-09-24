@@ -41,6 +41,7 @@ FE: React + Recharts/visx, Tailwind, SWR/React Query.
 1. 백엔드(FastAPI)
    - 터미널 gitbash 열기
    - `cd backend`
+	 - venv 폴더없으면 `python -m venv venv`
    - `source ./venv/Scripts/Activate` ((venv)라고 뜨면 성공)
    - 필요한 패키지 설치: `pip install -r requirements.txt` (또는 README 상단 명령 참고)
    - backend 폴더에 백엔드 .env 파일 없으면 넣기.
