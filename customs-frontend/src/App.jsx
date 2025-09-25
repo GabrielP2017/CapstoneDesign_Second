@@ -8,7 +8,7 @@ import Insights from "./components/DashBoard/CustomsPredictor";
 import AdminShipments from "./components/Admin/AdminShipments";
 
 function App() {
-  const [sideBarCollapsed, setSideBarCollapsed] = useState(false);
+  const [sideBarCollapsed, setSideBarCollapsed] = useState(true);
   const [currentPage, setCurrentPage] = useState("dashboard");
 
   return (
