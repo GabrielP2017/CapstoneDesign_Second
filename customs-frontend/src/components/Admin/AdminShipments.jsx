@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { adminListTrackings, adminSyncFromFile, adminGetShipmentEvents } from "../../lib/api";
-import { ChevronDown, ChevronRight, Clock, AlertTriangle, CheckCircle, Loader2 as LoaderIcon } from "lucide-react"; // 아이콘 사용
+import { adminListTrackings, adminGetShipmentEvents, adminGetShipmentDetails, adminSaveShipmentDetails } from "../../lib/api";
+import { ChevronDown, ChevronRight, Clock, AlertTriangle, CheckCircle, Loader2 as LoaderIcon, Pencil } from "lucide-react";
+import { adminSyncFromFile } from "../../lib/api";
 
 // Loader 아이콘
 
@@ -59,6 +60,101 @@ function formatDate(v) {
   }
 }
 
+// // 간단 날짜 포맷터
+// function formatDate(s) {
+//   if (!s) return "-";
+//   try { return new Date(s).toLocaleString(); } catch { return String(s); }
+// }
+
+const LABELS = {
+  product_info: "물품 정보",
+  clearance_status_text: "통관진행상태",
+  progress_status_text: "진행상태",
+  origin_country: "적출국",
+  loading_port: "적재항",
+  cargo_type: "화물구분",
+  container_no: "컨테이너번호",
+  customs_office: "세관명",
+  arrival_port_name: "입항명",
+  arrival_date: "입항일",
+  tax_reference_date: "(합산과세 기준일)",
+  processed_at: "처리일시",
+  forwarder_name: "화물운송주선업자(포워더) 업체명",
+  forwarder_phone: "전화번호",
+  quantity: "수량",
+  weight_kg: "무게",
+};
+
+function DetailsCard({ number, details, onSaved }) {
+  const [edit, setEdit] = useState(false);
+  const [form, setForm] = useState(details || {});
+  useEffect(() => setForm(details || {}), [details]);
+
+  const onChange = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const save = async () => {
+    const payload = { ...form };
+    await adminSaveShipmentDetails(number, payload);
+    setEdit(false);
+    onSaved && onSaved(payload);
+  };
+
+  const Row = ({ k, render }) => (
+    <div className="grid grid-cols-[180px_1fr] gap-3 py-1">
+      <div className="text-slate-500">{LABELS[k] || k}</div>
+      <div>{render()}</div>
+    </div>
+  );
+
+  const fields = [
+    "product_info","quantity","weight_kg","clearance_status_text","progress_status_text","origin_country","loading_port",
+    "cargo_type","container_no","customs_office","arrival_port_name","arrival_date","tax_reference_date","processed_at",
+    "forwarder_name","forwarder_phone"
+  ];
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200">
+        <div className="font-medium">세관/화물 상세</div>
+        <button className="text-slate-600 hover:text-slate-900 inline-flex items-center gap-1" onClick={() => setEdit((e) => !e)}>
+          <Pencil className="w-4 h-4" /> {edit ? "취소" : "수정"}
+        </button>
+      </div>
+      <div className="p-3">
+        {fields.map((k) => (
+          <Row key={k} k={k} render={() => (
+            edit ? (
+              ["arrival_date","tax_reference_date","processed_at"].includes(k) ? (
+                <input
+                  className="px-2 py-1 border rounded w-full"
+                  placeholder="YYYY-MM-DD 또는 ISO"
+                  value={form[k] || ""}
+                  onChange={(e) => onChange(k, e.target.value)}
+                />
+              ) : (
+                <input
+                  className="px-2 py-1 border rounded w-full"
+                  value={form[k] ?? ""}
+                  onChange={(e) => onChange(k, e.target.value)}
+                />
+              )
+            ) : (
+              ["arrival_date","tax_reference_date","processed_at"].includes(k)
+                ? <span>{formatDate(details?.[k])}</span>
+                : <span>{details?.[k] || "-"}</span>
+            )
+          )} />
+        ))}
+
+        {edit && (
+          <div className="pt-3">
+            <button onClick={save} className="px-3 py-1 rounded bg-slate-900 text-white hover:bg-slate-800">저장</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminShipments() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]);
@@ -70,6 +166,8 @@ export default function AdminShipments() {
   const [eventsMap, setEventsMap] = useState(() => new Map()); // number -> events[]
   const [eventsLoading, setEventsLoading] = useState(() => new Set()); // 로딩중 번호
 
+  const [detailsMap, setDetailsMap] = useState(() => new Map());
+  const [detailsLoading, setDetailsLoading] = useState(() => new Set());
   async function load() {
     setError("");
     setLoading(true);
@@ -107,34 +205,29 @@ export default function AdminShipments() {
     }
   };
 
-  
+  const fetchDetails = async (number) => {
+    if (detailsMap.has(number) || detailsLoading.has(number)) return;
+    const s = new Set(detailsLoading); s.add(number); setDetailsLoading(s);
+    try {
+      const d = await adminGetShipmentDetails(number);
+      const m = new Map(detailsMap); m.set(number, d || {}); setDetailsMap(m);
+    } finally {
+      const s2 = new Set(detailsLoading); s2.delete(number); setDetailsLoading(s2);
+    }
+  };
+
   const toggleExpand = async (number) => {
     const next = new Set(expanded);
-    if (next.has(number)) {
-      next.delete(number);
-      setExpanded(next);
-      return;
-    }
-    next.add(number);
-    setExpanded(next);
-    // 이벤트가 없고 아직 로딩한 적 없으면 fetch
+    if (next.has(number)) { next.delete(number); setExpanded(next); return; }
+    next.add(number); setExpanded(next);
+    // 이벤트 & 상세 동시 프리패치
     if (!eventsMap.has(number) && !eventsLoading.has(number)) {
-      const loadingSet = new Set(eventsLoading);
-      loadingSet.add(number);
-      setEventsLoading(loadingSet);
-      try {
-        const evts = await adminGetShipmentEvents(number);
-        const m = new Map(eventsMap);
-        m.set(number, Array.isArray(evts) ? evts : []);
-        setEventsMap(m);
-      } catch (e) {
-        // 실패 시 빈 배열 캐시(한번 접었다가 펴면 다시 시도하려면 여기서 캐시 안할 수도)
-      } finally {
-        const s = new Set(eventsLoading);
-        s.delete(number);
-        setEventsLoading(s);
-      }
+      const s = new Set(eventsLoading); s.add(number); setEventsLoading(s);
+      adminGetShipmentEvents(number)
+        .then((evts) => { const m = new Map(eventsMap); m.set(number, evts || []); setEventsMap(m); })
+        .finally(() => { const s2 = new Set(eventsLoading); s2.delete(number); setEventsLoading(s2); });
     }
+    fetchDetails(number);
   };
 
   const isEmpty = !loading && rows.length === 0;
@@ -224,9 +317,12 @@ export default function AdminShipments() {
                 <tr><td colSpan={6} className="py-6 text-center text-slate-500">데이터가 없습니다.</td></tr>
               ) : (
                 rows.map((r) => {
-                  const isOpen = expanded.has(r.number);
-                  const evtLoading = eventsLoading.has(r.number);
-                  const events = eventsMap.get(r.number) || [];
+          const isOpen = expanded.has(r.number);
+          const evtLoading = eventsLoading.has(r.number);
+          const events = eventsMap.get(r.number) || [];
+          const detLoading = detailsLoading.has(r.number);
+          const details = detailsMap.get(r.number) || {};
+          
                   const translatedEventText = TIMELINE_DESC_TRANSLATIONS[r.last_event_text]?.trim() || r.last_event_text;
 
                   return (
@@ -249,52 +345,65 @@ export default function AdminShipments() {
                       </tr>
 
                       {/* [NEW] 펼친 영역 */}
-                      {isOpen && (
-                        <tr>
-                          <td></td>
-                          <td colSpan={5} className="pb-3">
-                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                              <div className="font-medium mb-2">이벤트 타임라인</div>
-                              {evtLoading ? (
-                                <div className="text-slate-500 inline-flex items-center gap-2">
-                                  <LoaderIcon className="w-4 h-4 animate-spin" />
-                                  불러오는 중…
-                                </div>
-                              ) : events.length === 0 ? (
-                                <div className="text-slate-500">이벤트가 없습니다.</div>
-                              ) : (
-                                <ul className="space-y-2">
-                                  {events.map((e, idx) => {
-                                    const t = formatDate(e.ts);
-                                    const s = (e.stage || "").toUpperCase();
-                                    const desc = TIMELINE_DESC_TRANSLATIONS[e.desc]?.trim() || e.desc || "";
-                                    return (
-                                      <li key={idx} className="flex items-start gap-2">
-                                        {/* 간단한 스테이지 아이콘 */}
-                                        {s === "CLEARED" ? (
-                                          <CheckCircle className="w-4 h-4 mt-0.5" />
-                                        ) : s === "DELAY" ? (
-                                          <AlertTriangle className="w-4 h-4 mt-0.5" />
-                                        ) : (
-                                          <Clock className="w-4 h-4 mt-0.5" />
-                                        )}
-                                        <div className="grid grid-cols-[120px_1fr] gap-2">
-                                          <div className="text-slate-500">{t}</div>
-                                          <div>
-                                            <span className="inline-block mr-2 align-middle"><StatusPill status={s} /></span>
-                                            <span className="align-middle">{desc}</span>
-                                            {e.source && <span className="ml-2 text-xs text-slate-400">({e.source})</span>}
-                                          </div>
-                                        </div>
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
+                       {isOpen && (
+                <tr>
+                  <td></td>
+                  <td colSpan={5} className="pb-3">
+                    <div className="grid gap-3">
+                      {/* 상세 카드 */}
+                      {detLoading ? (
+                        <div className="text-slate-500 inline-flex items-center gap-2">
+                          <LoaderIcon className="w-4 h-4 animate-spin" /> 상세 불러오는 중…
+                        </div>
+                      ) : (
+                        <DetailsCard
+                          number={r.number}
+                          details={details}
+                          onSaved={(patch) => {
+                            const m = new Map(detailsMap);
+                            m.set(r.number, { ...(details || {}), ...patch });
+                            setDetailsMap(m);
+                          }}
+                        />
                       )}
+
+                      {/* 이벤트 타임라인 카드 (이전과 동일) */}
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                        <div className="font-medium mb-2">이벤트 타임라인</div>
+                        {evtLoading ? (
+                          <div className="text-slate-500 inline-flex items-center gap-2">
+                            <LoaderIcon className="w-4 h-4 animate-spin" />
+                            불러오는 중…
+                          </div>
+                        ) : events.length === 0 ? (
+                          <div className="text-slate-500">이벤트가 없습니다.</div>
+                        ) : (
+                          <ul className="space-y-2">
+                            {events.map((e, idx) => {
+                              const s = (e.stage || "").toUpperCase();
+                              return (
+                                <li key={idx} className="flex items-start gap-2">
+                                  {s === "CLEARED" ? <CheckCircle className="w-4 h-4 mt-0.5" /> :
+                                   s === "DELAY"   ? <AlertTriangle className="w-4 h-4 mt-0.5" /> :
+                                                     <Clock className="w-4 h-4 mt-0.5" />}
+                                  <div className="grid grid-cols-[120px_1fr] gap-2">
+                                    <div className="text-slate-500">{formatDate(e.ts)}</div>
+                                    <div>
+                                      <span className="inline-block mr-2 align-middle"><StatusPill status={s} /></span>
+                                      <span className="align-middle">{e.desc || ""}</span>
+                                      {e.source && <span className="ml-2 text-xs text-slate-400">({e.source})</span>}
+                                    </div>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              )}
                     </React.Fragment>
                   );
                 })

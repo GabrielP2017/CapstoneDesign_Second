@@ -53,6 +53,8 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from sqlalchemy import UniqueConstraint, ForeignKey
 
+
+
 app = FastAPI(title="17TRACK Customs Filter – Enhanced")
 
 FRONTEND_ORIGINS = [
@@ -106,6 +108,36 @@ class ShipmentEvent(Base):
         UniqueConstraint("shipment_id", "ts", "stage", "desc", name="uq_shipment_event_dedup"),
     )
 
+
+
+# ======================= NEW: 통관/화물 상세 =======================
+class ShipmentDetails(Base):
+    __tablename__ = "shipment_details"
+    id = Column(Integer, primary_key=True)
+    shipment_id = Column(Integer, ForeignKey("shipments.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    tracking_number = Column(String(128), index=True, nullable=False)
+
+    # 표시 필드들
+    product_info = Column(Text)               # 물품 정보 (예: "HUMAN DOLLS OF TEXTILE MATERIALS 1 ...")
+    quantity = Column(Integer)                # 수량
+    weight_kg = Column(String(32))            # "0.1KG"처럼 단위 포함 문자열로 보관
+    clearance_status_text = Column(String(120))  # 통관진행상태 (예: "통관목록심사완료")
+    progress_status_text = Column(String(120))   # 진행상태 (예: "통관목록심사완료")
+    origin_country = Column(String(80))       # 적출국 (예: "중국")
+    loading_port = Column(String(120))        # 적재항 (예: "옌타이")
+    cargo_type = Column(String(80))           # 화물구분 (예: "수입 일반화물")
+    container_no = Column(String(80))         # 컨테이너번호
+    customs_office = Column(String(120))      # 세관명 (예: "인천공항세관")
+    arrival_port_name = Column(String(120))   # 입항명 (예: "서울/인천")
+    arrival_date = Column(DateTime(timezone=True))      # 입항일
+    tax_reference_date = Column(DateTime(timezone=True))# (합산과세 기준일)
+    processed_at = Column(DateTime(timezone=True))      # 처리일시
+    forwarder_name = Column(String(160))      # 화물운송주선업자(포워더) 업체명
+    forwarder_phone = Column(String(64))      # 포워더 전화번호
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+# ======================= /NEW =======================
 
 class EventOut(BaseModel):
     ts: str
@@ -506,6 +538,135 @@ async def get_trackinfo(numbers: List[str]):
     return await _post_json("gettrackinfo", payload)
 
 
+# Pydantic DTO
+class ShipmentDetailsIn(BaseModel):
+    product_info: Optional[str] = None
+    quantity: Optional[int] = None
+    weight_kg: Optional[str] = None
+    clearance_status_text: Optional[str] = None
+    progress_status_text: Optional[str] = None
+    origin_country: Optional[str] = None
+    loading_port: Optional[str] = None
+    cargo_type: Optional[str] = None
+    container_no: Optional[str] = None
+    customs_office: Optional[str] = None
+    arrival_port_name: Optional[str] = None
+    arrival_date: Optional[str] = None          # ISO 또는 "YYYY-MM-DD"
+    tax_reference_date: Optional[str] = None    # ISO 또는 "YYYY-MM-DD"
+    processed_at: Optional[str] = None          # ISO
+    forwarder_name: Optional[str] = None
+    forwarder_phone: Optional[str] = None
+
+class ShipmentDetailsOut(ShipmentDetailsIn):
+    tracking_number: str
+    updated_at: Optional[str] = None
+
+def _dt_or_none(s: Optional[str]):
+    if not s:
+        return None
+    try:
+        return _to_dt_utc(s)
+    except Exception:
+        try:
+            # 날짜만 들어오는 케이스("2025-01-22")도 수용
+            return _to_dt_utc(s + "T00:00:00Z")
+        except Exception:
+            return None
+
+def _kcs_status_text(status: Optional[str]) -> str:
+    # 내부 상태를 한국 관세 표현으로 보조 맵핑
+    if (status or "").upper() == "CLEARED":
+        return "통관목록심사완료"
+    if (status or "").upper() == "DELAY":
+        return "통관지연"
+    if (status or "").upper() == "IN_PROGRESS":
+        return "통관진행중"
+    return "확인중"
+
+def upsert_shipment_details(db, shipment_obj: Shipment, patch: Dict[str, Any]):
+    if not patch:
+        return None
+    row = (
+        db.query(ShipmentDetails)
+          .filter(ShipmentDetails.shipment_id == shipment_obj.id)
+          .one_or_none()
+    )
+    if row is None:
+        row = ShipmentDetails(shipment_id=shipment_obj.id, tracking_number=shipment_obj.tracking_number)
+        db.add(row)
+
+    # 일반 문자열 필드
+    for k in [
+        "product_info", "weight_kg", "clearance_status_text", "progress_status_text",
+        "origin_country", "loading_port", "cargo_type", "container_no",
+        "customs_office", "arrival_port_name", "forwarder_name", "forwarder_phone"
+    ]:
+        v = patch.get(k, None)
+        if v is not None and str(v).strip() != "":
+            setattr(row, k, v)
+
+    # 숫자
+    if "quantity" in patch and patch["quantity"] is not None:
+        row.quantity = int(patch["quantity"])
+
+    # 날짜/시간
+    for k in ["arrival_date", "tax_reference_date", "processed_at"]:
+        v = patch.get(k, None)
+        if v:
+            dtv = _dt_or_none(v) if isinstance(v, str) else v
+            if dtv:
+                setattr(row, k, dtv)
+
+    db.flush()
+    return row
+
+def _extract_details_best_effort_from_track(track: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    17TRACK payload에서 얻을 수 있는 것만 '최대한' 추출 (없으면 빈 값 유지).
+    - 적출국(origin_country): 국가명/코드 힌트
+    - 적재항(loading_port): 이벤트 설명에 항구명(예: Yantai/옌타이/烟台) 히ュー리스틱
+    - 처리일시(processed_at): 최신 이벤트 시간
+    """
+    out: Dict[str, Any] = {}
+
+    ti = _ti_view(track or {})
+
+    # 최신 이벤트 시각 → 처리일시
+    latest_ts = None
+    providers = (((ti.get("tracking") or {}).get("providers")) or [])
+    evts = []
+    for p in providers:
+        evts.extend(p.get("events") or [])
+    if ti.get("latest_event"):
+        evts.append(ti["latest_event"])
+    for e in evts:
+        t = _parse_multi_time(e)
+        if t and (latest_ts is None or t > latest_ts):
+            latest_ts = t
+        # 적재항 힌트
+        d = (e.get("description") or "")
+        if not out.get("loading_port"):
+            if re.search(r"\b(YANTAI|Yantai|烟台|옌타이)\b", d, flags=re.I):
+                out["loading_port"] = "옌타이"
+
+    if latest_ts:
+        out["processed_at"] = latest_ts.isoformat()
+
+    # 적출국 힌트 (origin/shipper country 추정)
+    # 스키마가 제각각이라 매우 보수적으로만 시도
+    cand = (
+        (ti.get("latest_status") or {}).get("origin_country") or
+        (ti.get("destination") or {}).get("origin_country") or
+        (ti.get("origin") or {}).get("country") or
+        (ti.get("tracking") or {}).get("origin_country")
+    )
+    if isinstance(cand, str) and not out.get("origin_country"):
+        # 간단히 중국/중국어 케이스 매핑
+        if re.search(r"china|cn|中国|中國|중국", cand, re.I):
+            out["origin_country"] = "중국"
+
+    return out
+
 # =============== 라우트 ===============
 # [ANCHOR: ROUTES]
 
@@ -761,6 +922,22 @@ def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalize
         obj.updated_at = now
         db.add(obj)
 
+   # --- 자동 상세 채움(가능한 범위) ---
+        # 상태 텍스트는 내부 요약 → 한국식 표현으로 보조 매핑
+        auto_patch = {
+            "clearance_status_text": _kcs_status_text(incoming_status),
+            "progress_status_text": _kcs_status_text(incoming_status),
+        }
+        # 최신 이벤트를 처리일시로
+        if normalized_events:
+            latest = normalized_events[-1]
+            if latest.get("ts"):
+                auto_patch["processed_at"] = latest["ts"] if isinstance(latest["ts"], str) else latest["ts"].isoformat()
+
+        # 17TRACK payload에서 힌트 추출 (적재항/적출국 등)
+        # upsert_shipment 호출부에서 track 객체가 없으니, 여기서는 생략하거나
+        # _fetch_and_upsert_many() 쪽에서 추출하여 넘겨도 OK. 우선 normalized만으로 진행.
+        upsert_shipment_details(db, obj, auto_patch)
         # 기존 코드의 obj 생성/갱신 후, 커밋 전에 이벤트 적재
         _inserted = _upsert_events_for_shipment(db, obj, normalized_events, source="normalized")
         # 필요시 로깅: print(f"events inserted: {_inserted}")
@@ -965,6 +1142,54 @@ def admin_shipment_events(number: str):
             ).model_dump()
             for r in rows
         ]
+
+@app.get("/admin/shipments/{number}/details")
+def admin_get_shipment_details(number: str):
+    with get_db() as db:
+        ship = db.query(Shipment).filter(Shipment.tracking_number == number).one_or_none()
+        if not ship:
+            raise HTTPException(status_code=404, detail="shipment not found")
+        row = db.query(ShipmentDetails).filter(ShipmentDetails.shipment_id == ship.id).one_or_none()
+        if not row:
+            # 비어 있으면 기본 구조로 응답
+            return ShipmentDetailsOut(tracking_number=number).model_dump()
+
+        def _iso(dt):
+            return dt.isoformat() if getattr(dt, "isoformat", None) else None
+
+        return ShipmentDetailsOut(
+            tracking_number=number,
+            product_info=row.product_info,
+            quantity=row.quantity,
+            weight_kg=row.weight_kg,
+            clearance_status_text=row.clearance_status_text,
+            progress_status_text=row.progress_status_text,
+            origin_country=row.origin_country,
+            loading_port=row.loading_port,
+            cargo_type=row.cargo_type,
+            container_no=row.container_no,
+            customs_office=row.customs_office,
+            arrival_port_name=row.arrival_port_name,
+            arrival_date=_iso(row.arrival_date),
+            tax_reference_date=_iso(row.tax_reference_date),
+            processed_at=_iso(row.processed_at),
+            forwarder_name=row.forwarder_name,
+            forwarder_phone=row.forwarder_phone,
+            updated_at=_iso(row.updated_at),
+        ).model_dump()
+
+@app.put("/admin/shipments/{number}/details")
+def admin_put_shipment_details(number: str, body: ShipmentDetailsIn):
+    with get_db() as db:
+        ship = db.query(Shipment).filter(Shipment.tracking_number == number).one_or_none()
+        if not ship:
+            raise HTTPException(status_code=404, detail="shipment not found")
+        patch = body.model_dump(exclude_unset=True)
+        # 날짜 문자열은 upsert 함수에서 파싱
+        row = upsert_shipment_details(db, ship, patch)
+        def _iso(dt): return dt.isoformat() if getattr(dt, "isoformat", None) else None
+        return {"ok": True, "tracking_number": number, "updated_at": _iso(row.updated_at) if row else None}
+
 
 # =========================
 # 데모 실행(옵션)

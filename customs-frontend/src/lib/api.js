@@ -141,3 +141,15 @@ export async function adminListTrackings(signal) {
   export function adminGetShipmentEvents(number, signal) {
     return http(`/admin/shipments/${encodeURIComponent(number)}/events`, { signal });
   }
+
+  // 이미 있는 http 래퍼 사용
+export function adminGetShipmentDetails(number, signal) {
+  return http(`/admin/shipments/${encodeURIComponent(number)}/details`, { signal });
+}
+
+export function adminSaveShipmentDetails(number, payload) {
+  return http(`/admin/shipments/${encodeURIComponent(number)}/details`, {
+    method: "PUT",
+    body: payload,
+  });
+}
