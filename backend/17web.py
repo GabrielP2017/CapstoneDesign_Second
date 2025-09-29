@@ -379,28 +379,41 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
 # =============== 요약 ===============
 # [ANCHOR: SUMMARY]
 
-def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """통관 요약: 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
-    first_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS"), None)
-    cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED"), None)
-    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY"]
+# 17web.py 파일의 summarize_customs 함수를 아래 내용으로 교체하세요.
 
-    # 누락 보정: 완료만 있고 진행이 없으면 최선의 앞 이벤트를 진행으로 간주
-    if cleared and not first_in and events:
-        first_in = events[0]["ts"]
+def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """통관 요약: '수입' 통관 기준 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
+    
+    # ▼▼▼ [수정된 부분] 'import' 라는 단어가 포함된 이벤트 중에서 찾도록 조건 추가 ▼▼▼
+    first_import_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS" and "import" in e.get("desc", "").lower()), None)
+    import_cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED" and "import" in e.get("desc", "").lower()), None)
+    # ▲▲▲
+
+    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY" and "import" in e.get("desc", "").lower()]
+
+    # 누락 보정: 수입 완료만 있고 수입 진행이 없으면, 완료 바로 앞 이벤트를 진행으로 간주
+    if import_cleared and not first_import_in and events:
+        try:
+            cleared_index = next(i for i, e in enumerate(events) if e["ts"] == import_cleared)
+            if cleared_index > 0:
+                first_import_in = events[cleared_index - 1]["ts"]
+        except StopIteration:
+            pass # 못 찾으면 그냥 둠
 
     duration_sec: Optional[int] = None
-    if first_in and cleared:
-        duration_sec = int((cleared - first_in).total_seconds())
+    if first_import_in and import_cleared:
+        duration_sec = int((import_cleared - first_import_in).total_seconds())
 
+    # ▼▼▼ [수정된 부분] 반환 값에 수정된 변수 사용 ▼▼▼
     return {
-        "status": "CLEARED" if cleared else ("IN_PROGRESS" if first_in else "UNKNOWN"),
-        "in_progress_at": first_in.isoformat() if first_in else None,
-        "cleared_at": cleared.isoformat() if cleared else None,
+        "status": "CLEARED" if import_cleared else ("IN_PROGRESS" if first_import_in else "UNKNOWN"),
+        "in_progress_at": first_import_in.isoformat() if first_import_in else None,
+        "cleared_at": import_cleared.isoformat() if import_cleared else None,
         "has_delay": bool(delays),
         "delays": delays,
         "duration_sec": duration_sec,
     }
+    # ▲▲▲
 
 # =============== HTTP 호출 유틸 ===============
 # [ANCHOR: POLLING]
