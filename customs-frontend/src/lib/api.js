@@ -134,4 +134,10 @@ export async function adminListTrackings(signal) {
       source,
     };
   });
-}
+  }
+  
+
+  // [NEW] 단일 운송장 이벤트 조회
+  export function adminGetShipmentEvents(number, signal) {
+    return http(`/admin/shipments/${encodeURIComponent(number)}/events`, { signal });
+  }

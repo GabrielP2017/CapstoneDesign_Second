@@ -47,6 +47,11 @@ from sqlalchemy import (
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
+from pydantic import BaseModel
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+
+from sqlalchemy import UniqueConstraint, ForeignKey
 
 app = FastAPI(title="17TRACK Customs Filter – Enhanced")
 
@@ -86,7 +91,29 @@ class Shipment(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-# 테이블 생성
+class ShipmentEvent(Base):
+    __tablename__ = "shipment_events"
+    id = Column(Integer, primary_key=True)
+    shipment_id = Column(Integer, ForeignKey("shipments.id", ondelete="CASCADE"), index=True, nullable=False)
+    tracking_number = Column(String(128), index=True, nullable=False)
+    ts = Column(DateTime(timezone=True), index=True, nullable=False)  # 이벤트 시간 (UTC)
+    stage = Column(String(32), nullable=False)                       # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
+    desc = Column(Text, nullable=True)                                # 원문/번역 설명
+    source = Column(String(32), nullable=True)                        # 'webhook' | 'poll' | 'normalized'
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("shipment_id", "ts", "stage", "desc", name="uq_shipment_event_dedup"),
+    )
+
+
+class EventOut(BaseModel):
+    ts: str
+    stage: str
+    desc: str | None = None
+    source: str | None = None
+
+# 테이블 생성 (기존 코드와 함께 둡니다)
 Base.metadata.create_all(bind=engine)
 
 @contextmanager
@@ -379,41 +406,28 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
 # =============== 요약 ===============
 # [ANCHOR: SUMMARY]
 
-# 17web.py 파일의 summarize_customs 함수를 아래 내용으로 교체하세요.
-
 def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """통관 요약: '수입' 통관 기준 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
-    
-    # ▼▼▼ [수정된 부분] 'import' 라는 단어가 포함된 이벤트 중에서 찾도록 조건 추가 ▼▼▼
-    first_import_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS" and "import" in e.get("desc", "").lower()), None)
-    import_cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED" and "import" in e.get("desc", "").lower()), None)
-    # ▲▲▲
+    """통관 요약: 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
+    first_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS"), None)
+    cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED"), None)
+    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY"]
 
-    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY" and "import" in e.get("desc", "").lower()]
-
-    # 누락 보정: 수입 완료만 있고 수입 진행이 없으면, 완료 바로 앞 이벤트를 진행으로 간주
-    if import_cleared and not first_import_in and events:
-        try:
-            cleared_index = next(i for i, e in enumerate(events) if e["ts"] == import_cleared)
-            if cleared_index > 0:
-                first_import_in = events[cleared_index - 1]["ts"]
-        except StopIteration:
-            pass # 못 찾으면 그냥 둠
+    # 누락 보정: 완료만 있고 진행이 없으면 최선의 앞 이벤트를 진행으로 간주
+    if cleared and not first_in and events:
+        first_in = events[0]["ts"]
 
     duration_sec: Optional[int] = None
-    if first_import_in and import_cleared:
-        duration_sec = int((import_cleared - first_import_in).total_seconds())
+    if first_in and cleared:
+        duration_sec = int((cleared - first_in).total_seconds())
 
-    # ▼▼▼ [수정된 부분] 반환 값에 수정된 변수 사용 ▼▼▼
     return {
-        "status": "CLEARED" if import_cleared else ("IN_PROGRESS" if first_import_in else "UNKNOWN"),
-        "in_progress_at": first_import_in.isoformat() if first_import_in else None,
-        "cleared_at": import_cleared.isoformat() if import_cleared else None,
+        "status": "CLEARED" if cleared else ("IN_PROGRESS" if first_in else "UNKNOWN"),
+        "in_progress_at": first_in.isoformat() if first_in else None,
+        "cleared_at": cleared.isoformat() if cleared else None,
         "has_delay": bool(delays),
         "delays": delays,
         "duration_sec": duration_sec,
     }
-    # ▲▲▲
 
 # =============== HTTP 호출 유틸 ===============
 # [ANCHOR: POLLING]
@@ -622,6 +636,64 @@ def _serialize_normalized(ev_list):
     except Exception:
         # fallback
         return json.dumps([], ensure_ascii=False)
+def _upsert_events_for_shipment(
+    db,
+    shipment_obj: Shipment,
+    normalized_events: List[Dict[str, Any]],
+    source: str = "normalized",
+) -> int:
+    """
+    normalized_events 아이템 예시:
+    { "ts": "2025-09-16T13:30:00Z", "stage": "IN_PROGRESS", "desc": "..." }
+    """
+    if not normalized_events:
+        return 0
+
+    # 1) 입력단 중복 제거 (동일 페이로드가 같은 요청 내에서 여러 번 들어오는 경우 방어)
+    seen: set[tuple[str, str, str]] = set()
+    rows: List[Dict[str, Any]] = []
+
+    for e in normalized_events:
+        raw_ts = e.get("ts")
+        stage = (e.get("stage") or "").strip().upper()
+        desc = (e.get("desc") or "").strip()
+
+        if not raw_ts or not stage:
+            continue
+
+        # 문자열/Datetime 모두 허용
+        try:
+            ts_dt = dtp.parse(raw_ts) if isinstance(raw_ts, str) else raw_ts
+        except Exception:
+            continue
+
+        # 필요하면 미세중복 방지용으로 마이크로초 제거 (선택)
+        # ts_dt = ts_dt.replace(microsecond=0)
+
+        key = (ts_dt.isoformat(), stage, desc)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        rows.append({
+            "shipment_id": shipment_obj.id,
+            "tracking_number": shipment_obj.tracking_number,
+            "ts": ts_dt,
+            "stage": stage,
+            "desc": desc,        # 컬럼명은 desc (SQLAlchemy가 적절히 quoting)
+            "source": source,
+        })
+
+    if not rows:
+        return 0
+
+    # 2) DB 레벨 중복 무시 (UNIQUE (shipment_id, ts, stage, desc))
+    stmt = sqlite_insert(ShipmentEvent).values(rows).on_conflict_do_nothing(
+        index_elements=["shipment_id", "ts", "stage", "desc"]
+    )
+    result = db.execute(stmt)
+    # 일부 드라이버에서 rowcount 가 None일 수 있으므로 보조 지표로만 사용
+    return result.rowcount or 0
 
 def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalized_events: List[Dict[str, Any]], any_events: bool = False, carrier: Optional[str] = None):
     """
@@ -688,6 +760,11 @@ def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalize
         obj.any_events = int(any_events or obj.any_events)
         obj.updated_at = now
         db.add(obj)
+
+        # 기존 코드의 obj 생성/갱신 후, 커밋 전에 이벤트 적재
+        _inserted = _upsert_events_for_shipment(db, obj, normalized_events, source="normalized")
+        # 필요시 로깅: print(f"events inserted: {_inserted}")
+
         db.flush()
         return obj
 
@@ -850,6 +927,44 @@ def admin_list_shipments():
 def user_trackings():
     """사용자: DB의 모든 운송장 목록 (같은 포맷)"""
     return admin_shipments()
+
+
+@app.get("/admin/shipments/{number}/events")
+def admin_shipment_events(number: str):
+    with get_db() as db:
+        ship = db.query(Shipment).filter(Shipment.tracking_number == number).first()
+        if not ship:
+            raise HTTPException(status_code=404, detail="shipment not found")
+
+        rows = (db.query(ShipmentEvent)
+                  .filter(ShipmentEvent.shipment_id == ship.id)
+                  .order_by(ShipmentEvent.ts.asc())
+                  .all())
+
+        # 만약 과거 데이터로 인해 이벤트 테이블이 비어있다면, normalized에서 백필 + 즉시 반환
+        if not rows:
+            try:
+                norm = json.loads(ship.normalized or "[]")
+            except Exception:
+                norm = []
+            # 백필
+            if norm:
+                _upsert_events_for_shipment(db, ship, norm, source="normalized")
+                db.commit()
+                rows = (db.query(ShipmentEvent)
+                          .filter(ShipmentEvent.shipment_id == ship.id)
+                          .order_by(ShipmentEvent.ts.asc())
+                          .all())
+
+        return [
+            EventOut(
+                ts=(r.ts.isoformat() if hasattr(r.ts, "isoformat") else str(r.ts)),
+                stage=r.stage,
+                desc=r.desc,
+                source=r.source,
+            ).model_dump()
+            for r in rows
+        ]
 
 # =========================
 # 데모 실행(옵션)

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { adminListTrackings, adminSyncFromFile } from "../../lib/api";
+import { adminListTrackings, adminSyncFromFile, adminGetShipmentEvents } from "../../lib/api";
+import { ChevronDown, ChevronRight, Clock, AlertTriangle, CheckCircle, Loader2 as LoaderIcon } from "lucide-react"; // 아이콘 사용
 
 // Loader 아이콘
+
 const Loader2 = (props) => (
   <svg {...props} viewBox="0 0 24 24" className={`animate-spin ${props.className || ""}`}>
     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.25" />
@@ -62,6 +64,11 @@ export default function AdminShipments() {
   const [rows, setRows] = useState([]);
   const [syncResult, setSyncResult] = useState(null);
   const [error, setError] = useState("");
+  
+  // [NEW] 펼침 상태 & 이벤트 캐시
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [eventsMap, setEventsMap] = useState(() => new Map()); // number -> events[]
+  const [eventsLoading, setEventsLoading] = useState(() => new Set()); // 로딩중 번호
 
   async function load() {
     setError("");
@@ -97,6 +104,36 @@ export default function AdminShipments() {
       setError(e?.message || "동기화에 실패했습니다.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  
+  const toggleExpand = async (number) => {
+    const next = new Set(expanded);
+    if (next.has(number)) {
+      next.delete(number);
+      setExpanded(next);
+      return;
+    }
+    next.add(number);
+    setExpanded(next);
+    // 이벤트가 없고 아직 로딩한 적 없으면 fetch
+    if (!eventsMap.has(number) && !eventsLoading.has(number)) {
+      const loadingSet = new Set(eventsLoading);
+      loadingSet.add(number);
+      setEventsLoading(loadingSet);
+      try {
+        const evts = await adminGetShipmentEvents(number);
+        const m = new Map(eventsMap);
+        m.set(number, Array.isArray(evts) ? evts : []);
+        setEventsMap(m);
+      } catch (e) {
+        // 실패 시 빈 배열 캐시(한번 접었다가 펴면 다시 시도하려면 여기서 캐시 안할 수도)
+      } finally {
+        const s = new Set(eventsLoading);
+        s.delete(number);
+        setEventsLoading(s);
+      }
     }
   };
 
@@ -157,13 +194,13 @@ export default function AdminShipments() {
           )}
         </div>
       )}
-
-      <div className="bg-white/70 rounded-2xl shadow p-4">
+<div className="bg-white/70 rounded-2xl shadow p-4">
         <div className="font-semibold mb-3">DB 운송장 목록</div>
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead className="border-b border-slate-200">
               <tr className="text-left">
+                <th className="py-2 pr-4 w-8"></th>{/* [NEW] 펼침 토글 칼럼 */}
                 <th className="py-2 pr-4">운송장번호</th>
                 <th className="py-2 pr-4">상태</th>
                 <th className="py-2 pr-4">최근 이벤트</th>
@@ -174,30 +211,91 @@ export default function AdminShipments() {
             <tbody>
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-slate-100">
-                    <td colSpan={5} className="py-1 pr-4">
-                      <div className="h-8 rounded-md bg-slate-100 animate-pulse" />
-                    </td>
+                  <tr key={`skel-${i}`} className="animate-pulse">
+                    <td className="py-2 pr-4"><div className="h-4 w-4 bg-slate-200 rounded" /></td>
+                    <td className="py-2 pr-4"><div className="h-4 w-40 bg-slate-200 rounded" /></td>
+                    <td className="py-2 pr-4"><div className="h-4 w-24 bg-slate-200 rounded" /></td>
+                    <td className="py-2 pr-4"><div className="h-4 w-64 bg-slate-200 rounded" /></td>
+                    <td className="py-2 pr-4"><div className="h-4 w-40 bg-slate-200 rounded" /></td>
+                    <td className="py-2 pr-4"><div className="h-4 w-16 bg-slate-200 rounded" /></td>
                   </tr>
                 ))
               ) : isEmpty ? (
-                <tr>
-                  <td className="py-6 text-center text-slate-500" colSpan={5}>
-                    데이터가 없습니다.
-                  </td>
-                </tr>
+                <tr><td colSpan={6} className="py-6 text-center text-slate-500">데이터가 없습니다.</td></tr>
               ) : (
                 rows.map((r) => {
-                  const translatedEventText = TIMELINE_DESC_TRANSLATIONS[r.last_event_text] || r.last_event_text;
-                  
+                  const isOpen = expanded.has(r.number);
+                  const evtLoading = eventsLoading.has(r.number);
+                  const events = eventsMap.get(r.number) || [];
+                  const translatedEventText = TIMELINE_DESC_TRANSLATIONS[r.last_event_text]?.trim() || r.last_event_text;
+
                   return (
-                    <tr key={r.number} className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="py-2 pr-4 font-mono">{r.number}</td>
-                      <td className="py-2 pr-4"><StatusPill status={r.status} /></td>
-                      <td className="py-2 pr-4 text-slate-600">{translatedEventText || "-"}</td>
-                      <td className="py-2 pr-4 text-slate-500">{formatDate(r.last_event_at)}</td>
-                      <td className="py-2 pr-4 text-slate-500">{r.source || "-"}</td>
-                    </tr>
+                    <React.Fragment key={r.number}>
+                      <tr className="border-b border-slate-100">
+                        <td className="py-2 pr-4 align-top">
+                          <button
+                            onClick={() => toggleExpand(r.number)}
+                            className="p-1 rounded hover:bg-slate-100"
+                            title={isOpen ? "접기" : "펼치기"}
+                          >
+                            {isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          </button>
+                        </td>
+                        <td className="py-2 pr-4 font-mono">{r.number}</td>
+                        <td className="py-2 pr-4"><StatusPill status={r.status} /></td>
+                        <td className="py-2 pr-4 text-slate-600">{translatedEventText || "-"}</td>
+                        <td className="py-2 pr-4 text-slate-500">{formatDate(r.last_event_at)}</td>
+                        <td className="py-2 pr-4 text-slate-500">{r.source || "-"}</td>
+                      </tr>
+
+                      {/* [NEW] 펼친 영역 */}
+                      {isOpen && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={5} className="pb-3">
+                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                              <div className="font-medium mb-2">이벤트 타임라인</div>
+                              {evtLoading ? (
+                                <div className="text-slate-500 inline-flex items-center gap-2">
+                                  <LoaderIcon className="w-4 h-4 animate-spin" />
+                                  불러오는 중…
+                                </div>
+                              ) : events.length === 0 ? (
+                                <div className="text-slate-500">이벤트가 없습니다.</div>
+                              ) : (
+                                <ul className="space-y-2">
+                                  {events.map((e, idx) => {
+                                    const t = formatDate(e.ts);
+                                    const s = (e.stage || "").toUpperCase();
+                                    const desc = TIMELINE_DESC_TRANSLATIONS[e.desc]?.trim() || e.desc || "";
+                                    return (
+                                      <li key={idx} className="flex items-start gap-2">
+                                        {/* 간단한 스테이지 아이콘 */}
+                                        {s === "CLEARED" ? (
+                                          <CheckCircle className="w-4 h-4 mt-0.5" />
+                                        ) : s === "DELAY" ? (
+                                          <AlertTriangle className="w-4 h-4 mt-0.5" />
+                                        ) : (
+                                          <Clock className="w-4 h-4 mt-0.5" />
+                                        )}
+                                        <div className="grid grid-cols-[120px_1fr] gap-2">
+                                          <div className="text-slate-500">{t}</div>
+                                          <div>
+                                            <span className="inline-block mr-2 align-middle"><StatusPill status={s} /></span>
+                                            <span className="align-middle">{desc}</span>
+                                            {e.source && <span className="ml-2 text-xs text-slate-400">({e.source})</span>}
+                                          </div>
+                                        </div>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}
