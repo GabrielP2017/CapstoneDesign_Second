@@ -4,24 +4,24 @@ import { getHealth, getNormalizedTracking, triggerTestWebhook } from '../../lib/
 
 // --- 상단 메타 객체들/유틸리티/작은 UI 컴포넌트 ---
 const STATUS_META = {
-  CLEARED:     { label: '통관 완료',              badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' },
-  IN_PROGRESS: { label: '통관 진행',              badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' },
-  DELAY:       { label: '지연',                   badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' },
-  PRE_CUSTOMS: { label: '통관 전(입항 대기)',     badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
-  UNKNOWN:     { label: '확인 필요',              badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
+CLEARED: { label: '통관 완료', badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' },
+IN_PROGRESS: { label: '통관 진행', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' },
+DELAY: { label: '지연', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' },
+PRE_CUSTOMS: { label: '통관 전(입항 대기)', badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
+UNKNOWN: { label: '확인 필요', badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
 };
 const STAGE_META = { IN_PROGRESS: { label: '진행', dot: 'bg-blue-500' }, DELAY: { label: '지연', dot: 'bg-amber-500' }, CLEARED: { label: '완료', dot: 'bg-emerald-500' } };
 const TIMELINE_DESC_TRANSLATIONS = {
-  'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
-  'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
-  'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
-  'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
-  'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
+  'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
+  'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
+  'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
+  'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
+  'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
 };
 function formatDate(isoString, options = {}) {
-    if (!isoString) return null;
-    const defaultOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
-    try { return new Date(isoString).toLocaleString('ko-KR', { ...defaultOptions, ...options }); } catch { return isoString; }
+  if (!isoString) return null;
+   const defaultOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+  try { return new Date(isoString).toLocaleString('ko-KR', { ...defaultOptions, ...options }); } catch { return isoString; }
 }
 const toYYYYMMDD = (date) => {
   const year = date.getFullYear();
@@ -61,26 +61,26 @@ const JourneyProgressBar = ({ summary, events }) => {
     );
 };
 const AnimatedBlock = ({ children, delay = 0, className = '' }) => {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    setVisible(false);
-    const timer = setTimeout(() => setVisible(true), delay);
-    return () => clearTimeout(timer);
-  }, [delay, children]);
-  return ( <div className={`${className} transition-all duration-500 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>{children}</div> );
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+  setVisible(false);
+    const timer = setTimeout(() => setVisible(true), delay);
+  return () => clearTimeout(timer);
+  }, [delay, children]);
+  return ( <div className={`${className} transition-all duration-500 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>{children}</div> );
 };
 
 // --- 메인 컴포넌트 ---
 export default function TrackingStatus() {
   // --- 상태 관리 (모두 통합) ---
   // 통관 조회 상태
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [summary, setSummary] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [anyEvents, setAnyEvents] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [health, setHealth] = useState({ state: 'checking', detail: null });
+  const [trackingNumber, setTrackingNumber] = useState('');
+  const [summary, setSummary] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [anyEvents, setAnyEvents] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [health, setHealth] = useState({ state: 'checking', detail: null });
   // 시뮬레이션 상태
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [prediction, setPrediction] = useState([]);
@@ -93,7 +93,7 @@ export default function TrackingStatus() {
   const RANDOMNESS_FACTOR = 0.2;
 
   // --- 핸들러 및 로직 (모두 통합) ---
-  useEffect(() => {
+  useEffect(() => {
     let ignore = false;
     getHealth()
       .then((res) => { if (!ignore) setHealth({ state: 'ok', detail: res }); })
@@ -101,7 +101,7 @@ export default function TrackingStatus() {
     return () => { ignore = true; };
   }, []);
   
-  const resetResult = () => {
+  const resetResult = () => {
     setTrackingNumber('');
     setSummary(null);
     setEvents([]);
@@ -110,7 +110,7 @@ export default function TrackingStatus() {
     setPrediction([]); // 시뮬레이션 결과도 함께 초기화
   };
 
-  const lookup = async (number) => {
+  const lookup = async (number) => {
     const trimmed = number.trim();
     if (!trimmed) {
       setError('운송장 번호를 입력하세요.');
@@ -132,8 +132,8 @@ export default function TrackingStatus() {
       setLoading(false);
     }
   };
-  const handleSubmit = (e) => { e.preventDefault(); lookup(trackingNumber); };
-  const handleSample = async () => {
+  const handleSubmit = (e) => { e.preventDefault(); lookup(trackingNumber); };
+  const handleSample = async () => {
       setLoading(true);
       setError('');
       try {
@@ -152,7 +152,7 @@ export default function TrackingStatus() {
         setLoading(false);
       }
   };
-  const handleIncompleteTest = () => {
+  const handleIncompleteTest = () => {
     setLoading(true);
     setError('');
     const mockPreCustomsData = {
@@ -170,9 +170,9 @@ export default function TrackingStatus() {
   };
 
   // 시뮬레이션 관련 로직
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const minDate = toYYYYMMDD(today);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const minDate = toYYYYMMDD(today);
 
   const dateRange = Array.from({ length: 5 }).map((_, i) => {
     const date = new Date(selectedDate);
@@ -262,7 +262,7 @@ export default function TrackingStatus() {
 
   const statusKey = (summary?.status || 'UNKNOWN').toUpperCase();
 
-  return (
+  return (
     <div className='bg-white/80 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm'>
         <div className='flex flex-col gap-2 mb-6'>
             <div className='flex items-center justify-between'>
@@ -430,5 +430,5 @@ export default function TrackingStatus() {
             </div>
         )}
     </div>
-  );
+  );
 }
