@@ -131,7 +131,8 @@ class ShipmentDetails(Base):
     arrival_port_name = Column(String(120))   # 입항명 (예: "서울/인천")
     arrival_date = Column(DateTime(timezone=True))      # 입항일
     tax_reference_date = Column(DateTime(timezone=True))# (합산과세 기준일)
-    processed_at = Column(DateTime(timezone=True))      # 처리일시
+    event_processed_at = Column(DateTime(timezone=True))    # 처리일시(이벤트기준)
+    sync_processed_at = Column(DateTime(timezone=True))     # 처리일시(동기화기준)
     forwarder_name = Column(String(160))      # 화물운송주선업자(포워더) 업체명
     forwarder_phone = Column(String(64))      # 포워더 전화번호
 
@@ -259,6 +260,7 @@ PATTERNS = {
     "CLEARED": [
         r"\b(customs|clearance)\b.*\b(released|cleared|complete(?:d)?|approved)\b(?!\s*information)",
         r"released\s*from\s*customs",
+        r"\bdelivered\b|배송\s*완료",
         r"통관\s*(완료|해제|통과)",
         r"清关完成|放行|已放行",
         r"(aduana).*(liberad[oa]|aprobado|completado)",
@@ -268,6 +270,29 @@ PATTERNS = {
 COMPILED = {k: [re.compile(p, re.I) for p in v] for k, v in PATTERNS.items()}
 
 # =============== 유틸 ===============
+
+def _infer_location_from_desc(desc: str) -> tuple[Optional[str], str]:
+    """
+    description 앞부분에서 '군포HUB, ...' / 'XXX센터 · ...' 같은 패턴을 장소로 추정.
+    반환: (추정 장소 or None, 장소 제거 후 나머지 설명)
+    """
+    if not desc:
+        return None, ""
+    s = str(desc).strip()
+    # 흔한 구분자
+    seps = [",", "，", "·", " - ", " – ", " — "]
+    for sep in seps:
+        if sep in s:
+            left, right = s.split(sep, 1)
+            cand, rest = left.strip(), right.strip()
+            # 장소 힌트 단어
+            if len(cand) <= 24 and re.search(r"(HUB|허브|센터|물류|영업소|터미널|분류|대리점)", cand, re.I):
+                return cand, rest or s
+    # '군포HUB 상품 이동중...' 같이 구분자 없이 붙은 형태
+    m = re.match(r"^\s*([^\s,，·]{2,24}HUB)\s+(.*)$", s, re.I)
+    if m:
+        return m.group(1).strip(), m.group(2).strip() or s
+    return None, s
 
 def _ti_view(track: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -302,11 +327,8 @@ def _count_raw_events(track: Dict[str, Any]) -> int:
     return total
 
 def _parse_multi_time(ev: Dict[str, Any]) -> Optional[datetime]:
-    """
-    17TRACK v2 이벤트의 다양한 시간 필드를 UTC로 통일.
-    우선순위: time_iso → time_utc → (time_raw.date + time_raw.time + time_raw.timezone)
-    """
-    s = ev.get("time_iso") or ev.get("time_utc")
+    # ✅ UTC가 있으면 그것을 최우선으로 사용
+    s = ev.get("time_utc") or ev.get("time_iso")
     if not s:
         tr = ev.get("time_raw") or {}
         if tr.get("date") and tr.get("time"):
@@ -357,9 +379,26 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
                 ts_raw = e.get("a") or e.get("time") or e.get("time_iso")
                 desc = e.get("z") or e.get("description")
                 stg  = _stage_from_text((desc or "").strip())
+
+                # ★ v1 공식 위치 필드(c/d) 우선 사용
+                loc = e.get("c") or e.get("d") or None
+                if isinstance(loc, str):
+                    loc = loc.strip() or None
+
+                # 없으면 기존 휴리스틱으로 보완
+                if (not loc) and desc:
+                    inferred, rest = _infer_location_from_desc(desc)
+                    if inferred:
+                        loc, desc = inferred, rest
+
                 if ts_raw and stg:
                     try:
-                        events.append({"ts": _to_dt_utc(ts_raw), "stage": stg, "desc": desc})
+                        events.append({
+                            "ts": _to_dt_utc(ts_raw),
+                            "stage": stg,
+                            "desc": desc,
+                            "location": loc or None,
+                        })
                     except Exception:
                         pass
 
@@ -369,16 +408,18 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
     for prov in providers:
         for e in (prov.get("events") or []):
             ts   = _parse_multi_time(e)
-            desc = (e.get("description") or "")
-            stg  = _stage_from_text(desc.strip())
+            desc = (e.get("description") or "").strip()
+            stg  = _stage_from_text(desc)
 
-            # 1) v2 sub_status 보조 매핑
+            # 1) v2 sub_status 보조 매핑 (일반 운송 반영)
             if not stg:
                 sub = (e.get("sub_status") or "")
                 if sub in {"InTransit_CustomsProcessing", "InTransit_Arrival"}:
                     stg = "IN_PROGRESS"
                 elif sub in {"InTransit_CustomsReleased", "Delivered", "Delivered_Other"}:
                     stg = "CLEARED"
+                elif sub in {"InTransit_Other", "InTransit_Transit"}:  # ★ 추가
+                    stg = "IN_PROGRESS"
                 elif sub.startswith("Exception"):
                     stg = "DELAY"
 
@@ -388,17 +429,26 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
                 if stage_in_payload in {"delivered"}:
                     stg = "CLEARED"
 
-            # ✅ 누락됐던 append 추가
+            # 3) 위치 추출(문자열/객체 + desc 휴리스틱)
+            loc = e.get("location")
+            if isinstance(loc, dict):
+                loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+            elif isinstance(loc, str):
+                loc = loc.strip() or None
+            if not loc and desc:
+                inferred, rest = _infer_location_from_desc(desc)
+                if inferred:
+                    loc = inferred
+                    desc = rest  # 장소 접두부 제거
+
             if ts and stg:
-                events.append({"ts": ts, "stage": stg, "desc": desc})
+                events.append({"ts": ts, "stage": stg, "desc": desc, "location": loc or None})  # ★ location 포함
 
-
-    # --- (C) v2 latest_event 보조 (혹시 providers가 비어도 커버) ---
     le = ti.get("latest_event") or None
     if le:
         ts   = _parse_multi_time(le)
-        desc = (le.get("description") or "")
-        stg  = _stage_from_text(desc.strip())
+        desc = (le.get("description") or "").strip()
+        stg  = _stage_from_text(desc)
 
         if not stg:
             sub = (le.get("sub_status") or "")
@@ -406,6 +456,8 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
                 stg = "IN_PROGRESS"
             elif sub in {"InTransit_CustomsReleased", "Delivered", "Delivered_Other"}:
                 stg = "CLEARED"
+            elif sub in {"InTransit_Other", "InTransit_Transit"}:  # ★ 추가
+                stg = "IN_PROGRESS"
             elif sub.startswith("Exception"):
                 stg = "DELAY"
 
@@ -414,18 +466,36 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
             if stage_in_payload in {"delivered"}:
                 stg = "CLEARED"
 
-        if ts and stg:
-            events.append({"ts": ts, "stage": stg, "desc": desc})
+        # 위치 추출
+        loc = le.get("location")
+        if isinstance(loc, dict):
+            loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+        elif isinstance(loc, str):
+            loc = loc.strip() or None
+        if not loc and desc:
+            inferred, rest = _infer_location_from_desc(desc)
+            if inferred:
+                loc = inferred
+                desc = rest
 
-    # 정렬 + 중복 제거
+        if ts and stg:
+            events.append({"ts": ts, "stage": stg, "desc": desc, "location": loc or None})
+
+    # 정렬 + 중복 제거 (location 보존 병합)
     events.sort(key=_sort_key)
-    seen, out = set(), []
+    merged = {}  # key -> event
     for ev in events:
         key = (ev["ts"].isoformat(), ev["stage"], (ev["desc"] or "")[:160])
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(ev)
+        cur = merged.get(key)
+        if not cur:
+            merged[key] = ev
+        else:
+            # 기존에 location이 없고, 새로운 이벤트에 location이 있으면 보강
+            if (not cur.get("location")) and ev.get("location"):
+                cur["location"] = ev["location"]
+    # 이후 out 리스트로 변환 (하단 로직과 호환)
+    out = list(merged.values())
+
 
     # CLEARED가 진행보다 앞서는 역행 케이스 방어
     first_in = next((e for e in out if e["stage"] == "IN_PROGRESS"), None)
@@ -435,37 +505,41 @@ def normalize_from_track(track: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     return out
 
-# =============== 요약 ===============
-# [ANCHOR: SUMMARY]
 
 def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """통관 요약: '수입' 통관 기준 진행 시작 / 지연 유무 / 완료 시각 + 누락 보정 + 소요시간(초)"""
+    # 1) 'import' 우선, 없으면 일반 진행/완료도 허용
     
-    # ▼▼▼ [수정된 부분] 'import' 라는 단어가 포함된 이벤트 중에서 찾도록 조건 추가 ▼▼▼
-    first_import_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS" and "import" in e.get("desc", "").lower()), None)
-    import_cleared  = next((e["ts"] for e in events if e["stage"] == "CLEARED" and "import" in e.get("desc", "").lower()), None)
-    # ▲▲▲
+    _has = lambda e, kw: kw in (e.get("desc") or "").lower()
+    imp_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS" and _has(e, "import")), None)
+    any_in = next((e["ts"] for e in events if e["stage"] == "IN_PROGRESS"), None)
+    first_in = imp_in or any_in
 
-    delays   = [dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140]) for e in events if e["stage"] == "DELAY" and "import" in e.get("desc", "").lower()]
+    imp_cl = next((e["ts"] for e in events if e["stage"] == "CLEARED" and _has(e, "import")), None)
+    any_cl = next((e["ts"] for e in events if e["stage"] == "CLEARED"), None)
+    cleared = imp_cl or any_cl
 
-    # 누락 보정: 수입 완료만 있고 수입 진행이 없으면, 완료 바로 앞 이벤트를 진행으로 간주
-    if import_cleared and not first_import_in and events:
+    # 지연은 import 관련만 집계(원래 의도 유지)
+    delays = [
+        dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140])
+        for e in events
+        if e["stage"] == "DELAY" and _has(e, "import")
+    ]
+
+    # 누락 보정: 완료만 있고 진행이 없으면 직전 이벤트를 진행으로 간주
+    if cleared and not first_in and events:
         try:
-            cleared_index = next(i for i, e in enumerate(events) if e["ts"] == import_cleared)
-            if cleared_index > 0:
-                first_import_in = events[cleared_index - 1]["ts"]
+            idx = next(i for i, e in enumerate(events) if e["ts"] == cleared)
+            if idx > 0:
+                first_in = events[idx - 1]["ts"]
         except StopIteration:
-            pass # 못 찾으면 그냥 둠
+            pass
 
-    duration_sec: Optional[int] = None
-    if first_import_in and import_cleared:
-        duration_sec = int((import_cleared - first_import_in).total_seconds())
+    duration_sec = int((cleared - first_in).total_seconds()) if (first_in and cleared) else None
 
-    # ▼▼▼ [수정된 부분] 반환 값에 수정된 변수 사용 ▼▼▼
     return {
-        "status": "CLEARED" if import_cleared else ("IN_PROGRESS" if first_import_in else "UNKNOWN"),
-        "in_progress_at": first_import_in.isoformat() if first_import_in else None,
-        "cleared_at": import_cleared.isoformat() if import_cleared else None,
+        "status": "CLEARED" if cleared else ("IN_PROGRESS" if first_in else "UNKNOWN"),
+        "in_progress_at": first_in.isoformat() if first_in else None,
+        "cleared_at": cleared.isoformat() if cleared else None,
         "has_delay": bool(delays),
         "delays": delays,
         "duration_sec": duration_sec,
@@ -561,9 +635,10 @@ class ShipmentDetailsIn(BaseModel):
     container_no: Optional[str] = None
     customs_office: Optional[str] = None
     arrival_port_name: Optional[str] = None
-    arrival_date: Optional[str] = None          # ISO 또는 "YYYY-MM-DD"
-    tax_reference_date: Optional[str] = None    # ISO 또는 "YYYY-MM-DD"
-    processed_at: Optional[str] = None          # ISO
+    arrival_date: Optional[str] = None           # ISO 또는 "YYYY-MM-DD"
+    tax_reference_date: Optional[str] = None     # ISO 또는 "YYYY-MM-DD"
+    event_processed_at: Optional[str] = None     # ISO
+    sync_processed_at: Optional[str] = None      # ISO
     forwarder_name: Optional[str] = None
     forwarder_phone: Optional[str] = None
 
@@ -620,7 +695,7 @@ def upsert_shipment_details(db, shipment_obj: Shipment, patch: Dict[str, Any]):
         row.quantity = int(patch["quantity"])
 
     # 날짜/시간
-    for k in ["arrival_date", "tax_reference_date", "processed_at"]:
+    for k in ["arrival_date", "tax_reference_date", "event_processed_at", "sync_processed_at"]:
         v = patch.get(k, None)
         if v:
             dtv = _dt_or_none(v) if isinstance(v, str) else v
@@ -630,52 +705,303 @@ def upsert_shipment_details(db, shipment_obj: Shipment, patch: Dict[str, Any]):
     db.flush()
     return row
 
-def _extract_details_best_effort_from_track(track: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_details_best_effort_from_track(
+    track: Dict[str, Any],
+    tracking_number: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    17TRACK payload에서 얻을 수 있는 것만 '최대한' 추출 (없으면 빈 값 유지).
-    - 적출국(origin_country): 국가명/코드 힌트
-    - 적재항(loading_port): 이벤트 설명에 항구명(예: Yantai/옌타이/烟台) 히ュー리스틱
-    - 처리일시(processed_at): 최신 이벤트 시간
+    목적: 프론트 표시용 'details' 필드 계산
+      - origin_country (적출국) + origin_country_source
+      - arrival_date (입항일, YYYY-MM-DD)
+      - event_processed_at / sync_processed_at (처리일시 2종)
     """
     out: Dict[str, Any] = {}
-
     ti = _ti_view(track or {})
 
-    # 최신 이벤트 시각 → 처리일시
-    latest_ts = None
-    providers = (((ti.get("tracking") or {}).get("providers")) or [])
-    evts = []
-    for p in providers:
-        evts.extend(p.get("events") or [])
+    # [ANCHOR:ORIGIN_V1_BCODE] v1 track.b(정수 국가코드) → ISO2 → 한글
+    # 참고: v1 문서의 country code 표는 https://res.17track.net/asset/carrier/info/country.all.json (권고) :contentReference[oaicite:4]{index=4}
+    # 최소 커버(즉시효과): 중국(301) 등 빈출만 내장, 나머지는 미해당 시 패스
+    V1_COUNTRY_INT_TO_ISO2 = {
+        301: "CN",   # China
+        2105: "FR",  # 프랑스 (문서 예시에 등장)
+        # 필요시 확장: 운영 중 로그 보고 추가
+    }
+
+    # 1) ISO2 → 한글 맵퍼 (기존)
+    def _map_iso2_ko(code: Optional[str]) -> Optional[str]:
+        if not code or not isinstance(code, str):
+            return None
+        c = code.strip().upper()
+        ISO2_KO = {
+            "CN":"중국","KR":"대한민국","JP":"일본","US":"미국","HK":"홍콩","TW":"대만","SG":"싱가포르",
+            "MY":"말레이시아","TH":"태국","VN":"베트남","ID":"인도네시아","DE":"독일","NL":"네덜란드",
+            "GB":"영국","FR":"프랑스","ES":"스페인","IT":"이탈리아","PL":"폴란드","TR":"튀르키예","AE":"아랍에미리트"
+        }
+        return ISO2_KO.get(c) if re.fullmatch(r"[A-Z]{2}", c) else None
+
+    # 1.5) v1 전용: track.b가 있으면 최우선 사용
+    if "origin_country" not in out:
+        b_code = track.get("b")
+        if isinstance(b_code, int):
+            iso2 = V1_COUNTRY_INT_TO_ISO2.get(b_code)
+            if iso2:
+                mapped = _map_iso2_ko(iso2)
+                if mapped:
+                    out["origin_country"] = mapped
+                    out["origin_country_source"] = "v1.track.b"
+
+    # 1.6) UPU 트래킹번호 접미(예: *****CN) 힌트 (보조)
+    if "origin_country" not in out and isinstance(tracking_number, str) and tracking_number.strip().upper().endswith("CN"):
+        out["origin_country"] = "중국"
+        out["origin_country_source"] = "tracking_number_suffix"
+
+    # 2) 적출국 (우선순위: provider.country > shipping_info.shipper > 타임존 휴리스틱)
+    tracking_obj = ti.get("tracking") or track.get("tracking") or {}
+    providers = tracking_obj.get("providers") or []
+    if providers:
+        provider_info = (providers[0].get("provider") or {})
+        prov_country = (provider_info.get("country") or "").strip().upper()
+        mapped = _map_iso2_ko(prov_country)
+        if mapped and "origin_country" not in out:
+            out["origin_country"] = mapped
+            out["origin_country_source"] = "provider.country"
+        if "origin_country" not in out:
+            prov_name = (provider_info.get("name") or "").lower()
+            if any(cn in prov_name for cn in ["aliexpress","cainiao","yanwen","yunexpress","china"]):
+                out["origin_country"] = "중국"
+                out["origin_country_source"] = "provider.name"
+
+    if "origin_country" not in out:
+        ship = (ti.get("shipping_info") or {}).get("shipper_address") or {}
+        mapped = _map_iso2_ko((ship.get("country") or "").strip().upper())
+        if mapped:
+            out["origin_country"] = mapped
+            out["origin_country_source"] = "shipping_info.shipper_address.country"
+
+    if "origin_country" not in out and providers:
+        for p in providers:
+            for e in (p.get("events") or [])[:5]:
+                tz = ((e.get("time_raw") or {}).get("timezone") or "").strip()
+                desc = (e.get("description") or "").lower()
+                if any(kw in desc for kw in ["export","departure","leave","shipped"]) and tz in ["+08:00","+0800"]:
+                    out["origin_country"] = "중국"
+                    out["origin_country_source"] = "timezone_analysis"
+                    break
+            if "origin_country" in out:
+                break
+
+    # 3) 처리일시(이벤트기준/동기화기준)
+    max_ts = None
+    timeline = normalize_from_track(track or {})
+    for e in timeline:
+        t = e.get("ts")
+        if t and (max_ts is None or t > max_ts):
+            max_ts = t
+    if providers:
+        for p in providers:
+            for e in (p.get("events") or []):
+                t = _parse_multi_time(e)
+                if t and (max_ts is None or t > max_ts):
+                    max_ts = t
     if ti.get("latest_event"):
-        evts.append(ti["latest_event"])
-    for e in evts:
-        t = _parse_multi_time(e)
-        if t and (latest_ts is None or t > latest_ts):
-            latest_ts = t
-        # 적재항 힌트
-        d = (e.get("description") or "")
-        if not out.get("loading_port"):
-            if re.search(r"\b(YANTAI|Yantai|烟台|옌타이)\b", d, flags=re.I):
-                out["loading_port"] = "옌타이"
+        t = _parse_multi_time(ti["latest_event"])
+        if t and (max_ts is None or t > max_ts):
+            max_ts = t
+    if max_ts:
+        out["event_processed_at"] = max_ts.isoformat()
+    out["sync_processed_at"] = datetime.now(timezone.utc).isoformat()
 
-    if latest_ts:
-        out["processed_at"] = latest_ts.isoformat()
+    # 4) 입항일(YYYY-MM-DD)
+    # v2 milestone/arrival 우선
+    if (mil := ti.get("milestone")):
+        for m in mil:
+            if (m.get("key_stage") or "").lower() == "arrival":
+                dtv = _parse_multi_time(m)
+                if dtv:
+                    out["arrival_date"] = dtv.date().isoformat()
+                    break
 
-    # 적출국 힌트 (origin/shipper country 추정)
-    # 스키마가 제각각이라 매우 보수적으로만 시도
-    cand = (
-        (ti.get("latest_status") or {}).get("origin_country") or
-        (ti.get("destination") or {}).get("origin_country") or
-        (ti.get("origin") or {}).get("country") or
-        (ti.get("tracking") or {}).get("origin_country")
-    )
-    if isinstance(cand, str) and not out.get("origin_country"):
-        # 간단히 중국/중국어 케이스 매핑
-        if re.search(r"china|cn|中国|中國|중국", cand, re.I):
-            out["origin_country"] = "중국"
+    # v2 providers[].events 보조
+    if "arrival_date" not in out and providers:
+        for p in providers:
+            for e in (p.get("events") or []):
+                stage = (e.get("stage") or "").lower()
+                sub = (e.get("sub_status") or "")
+                if stage == "arrival" or sub == "InTransit_Arrival":
+                    dtv = _parse_multi_time(e)
+                    if dtv:
+                        out["arrival_date"] = dtv.date().isoformat()
+                        break
+            if "arrival_date" in out: break
+
+    # v1 z* 텍스트에 'import/도착/입항' 계열 키워드가 있으면 추정
+    if "arrival_date" not in out and timeline:
+        for e in timeline:
+            desc = (e.get("desc") or "").lower()
+            if e.get("stage") == "IN_PROGRESS" and (
+                "import" in desc or "arriv" in desc or "입항" in desc or "도착" in desc or "到港" in desc
+            ):
+                if e.get("ts"):
+                    out["arrival_date"] = e["ts"].date().isoformat()
+                    break
+
+    # [PATCH][ANCHOR:DETAILS-LAST-LOCATION]
+    # 3.5) 최신 '위치' 추출 → details.last_location
+    if "last_location" not in out:
+        last_loc = None
+        # 1) providers[].events 역순 스캔
+        if providers:
+            for p in providers:
+                evs = p.get("events") or []
+                for e in reversed(evs):
+                    loc = e.get("location")
+                    desc = (e.get("description") or "").strip()
+                    if isinstance(loc, dict):
+                        loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+                    elif isinstance(loc, str):
+                        loc = loc.strip() or None
+                    # [PATCH] location이 비면 desc에서 추정
+                    if not loc and desc:
+                        inferred, _ = _infer_location_from_desc(desc)
+                        if inferred:
+                            loc = inferred
+                    if loc:
+                        last_loc = loc
+                        break
+                if last_loc:
+                    break
+        # 2) latest_event 보조
+        if not last_loc and ti.get("latest_event"):
+            le = ti["latest_event"]
+            loc = le.get("location")
+            desc = (le.get("description") or "").strip()
+            if isinstance(loc, dict):
+                loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+            elif isinstance(loc, str):
+                loc = loc.strip() or None
+            if not loc and desc:
+                inferred, _ = _infer_location_from_desc(desc)
+                if inferred:
+                    loc = inferred
+            if loc:
+                last_loc = loc
+
+        # ★ NEW: 3) v1 z* 보조 (desc에서 장소 추정)
+        if not last_loc:
+            for k, v in (track or {}).items():
+                if isinstance(v, list) and (k.startswith("z") or k in {"z0","z1","z2","z9"}):
+                    for e in reversed(v):  # 가장 최근부터
+                        desc = (e.get("z") or e.get("description") or "").strip()
+                        if desc:
+                            inferred, _ = _infer_location_from_desc(desc)
+                            if inferred:
+                                last_loc = inferred
+                                break
+                if last_loc:
+                    break
+
+        if last_loc:
+            out["last_location"] = last_loc
 
     return out
+
+
+def _extract_raw_provider_events_min(track: Dict[str, Any]) -> list[dict]:
+    """
+    providers[].events + v1 z* 에서 화면용 최소필드만 추출
+    - ts: ISO8601(가능하면 UTC, 없으면 None)
+    - desc: description (장소 접두어 제거)
+    - location: 문자열(없으면 description 휴리스틱 추출)
+    """
+    ti = _ti_view(track or {})
+    providers = ((ti.get("tracking") or {}).get("providers")) or []
+    out: list[dict] = []
+
+    # v2 providers[].events
+    for p in providers:
+        for e in (p.get("events") or []):
+            dt = _parse_multi_time(e)
+            desc = (e.get("description") or "").strip()
+            loc = e.get("location")
+            if isinstance(loc, dict):
+                loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+            elif isinstance(loc, str):
+                loc = loc.strip() or None
+            if not loc and desc:
+                inferred, rest = _infer_location_from_desc(desc)
+                if inferred:
+                    loc, desc = inferred, rest
+            if dt or desc or loc:
+                out.append({
+                    "ts": dt.isoformat().replace("+00:00","Z") if dt else None,
+                    "desc": desc or None,
+                    "location": loc or None,
+                })
+
+    # v2 latest_event 보조
+    le = ti.get("latest_event")
+    if isinstance(le, dict):
+        dt = _parse_multi_time(le)
+        desc = (le.get("description") or "").strip()
+        loc = le.get("location")
+        if isinstance(loc, dict):
+            loc = (loc.get("city") or loc.get("state") or loc.get("postal_code") or "").strip() or None
+        elif isinstance(loc, str):
+            loc = loc.strip() or None
+        if not loc and desc:
+            inferred, rest = _infer_location_from_desc(desc)
+            if inferred:
+                loc, desc = inferred, rest
+        if dt or desc or loc:
+            out.append({
+                "ts": dt.isoformat().replace("+00:00","Z") if dt else None,
+                "desc": desc or None,
+                "location": loc or None,
+            })
+
+    # v1 z* 경로 (공식 위치 필드 우선)
+    for k, v in (track or {}).items():
+        if isinstance(v, list) and (k.startswith("z") or k in {"z0","z1","z2","z9"}):
+            for e in v:
+                ts_raw = e.get("a") or e.get("time") or e.get("time_iso")
+                dt = None
+                try:
+                    if ts_raw:
+                        dt = _to_dt_utc(ts_raw)
+                except Exception:
+                    dt = None
+
+                desc = (e.get("z") or e.get("description") or "").strip()
+
+                # ★ v1: c/d를 우선 읽음
+                loc = e.get("c") or e.get("d") or None
+                if isinstance(loc, str):
+                    loc = loc.strip() or None
+
+                # 없으면 설명에서 추정
+                if (not loc) and desc:
+                    inferred, rest = _infer_location_from_desc(desc)
+                    if inferred:
+                        loc, desc = inferred, rest
+
+                out.append({
+                    "ts": dt.isoformat().replace("+00:00","Z") if dt else None,
+                    "desc": desc or None,
+                    "location": loc or None,
+                })
+
+
+    # 정렬+중복제거
+    dedup = set()
+    out2 = []
+    for x in out:
+        key = (x["ts"], x["desc"], x["location"])
+        if key in dedup:
+            continue
+        dedup.add(key)
+        out2.append(x)
+    out2.sort(key=lambda x: (x["ts"] is None, x["ts"]))
+    return out2
 
 # =============== 라우트 ===============
 # [ANCHOR: ROUTES]
@@ -703,6 +1029,8 @@ async def webhook_17track(req: Request):
     if summary.get("status") == "UNKNOWN" and any_events:
         summary["status"] = "PRE_CUSTOMS"
 
+    details = _extract_details_best_effort_from_track(track, tracking_number=number)
+    raw_provider_events = _extract_raw_provider_events_min(track)
     return {
         "ok": True,
         "event": event,
@@ -710,22 +1038,22 @@ async def webhook_17track(req: Request):
         "summary": summary,
         "normalized_count": len(normalized),
         "any_events": any_events,
+        "details": details,
+        "raw_provider_events": raw_provider_events,
     }
-
 
 @app.get("/debug/normalize")
 async def debug_normalize(number: str):
     """폴링으로 실데이터 가져와 같은 정규화/요약을 실행(웹훅 미구축 시 점검용)."""
     payload = await get_trackinfo([number])
-    # API 응답 스키마 방어적으로 접근
-    # ✅ 다양한 스키마 방어: list | {data|result|list} | 단일 아이템
+    
+    # API 응답 파싱
     tracks: List[Dict[str, Any]] = []
     if isinstance(payload, list):
         tracks = payload
     elif isinstance(payload, dict):
         data_obj = payload.get("data")
         if isinstance(data_obj, dict):
-            # v1 공통 래퍼: {"code":0,"data":{"accepted":[...], "rejected":[...]}}
             buckets: List[Dict[str, Any]] = []
             for key in ("accepted", "result", "list"):
                 v = data_obj.get(key)
@@ -736,8 +1064,6 @@ async def debug_normalize(number: str):
             tracks = payload.get("result") or payload.get("list") or []
         elif payload.get("number"):
             tracks = [payload]
-        else:
-            tracks = []
 
     track_item: Optional[Dict[str, Any]] = None
     for item in tracks:
@@ -746,18 +1072,80 @@ async def debug_normalize(number: str):
         if str(item.get("number") or item.get("no") or "") == str(number):
             track_item = item
             break
-    # v1은 item["track"], v2는 item["track_info"]
+
     track = None
     if track_item:
+        # v1: track, v2: track_info
         track = track_item.get("track") or track_item.get("track_info") or track_item
 
-    normalized = normalize_from_track(track or {})
-    summary    = summarize_customs(normalized)
+    # ===== 핵심: provider에서 적출국 먼저 추출 =====
+    origin_country = None
+    origin_source = None
+    
+    if track:
+        # v1 API 구조 (실제 사용중)
+        tracking = track.get("tracking") or {}
+        providers = tracking.get("providers") or []
+        
+        # v2 API 구조 대비
+        if not providers:
+            ti = _ti_view(track)
+            tracking = ti.get("tracking") or {}
+            providers = tracking.get("providers") or []
+        
+        if providers and len(providers) > 0:
+            provider_info = providers[0].get("provider", {})
+            
+            # 1. provider.country 직접 확인
+            prov_country = provider_info.get("country")
+            if prov_country == "CN":
+                origin_country = "중국"
+                origin_source = "provider.country"
+                print(f"[API] ✅ Found origin from provider.country: CN → 중국")
+            elif prov_country == "KR":
+                origin_country = "대한민국"
+                origin_source = "provider.country"
+            
+            # 2. provider.name으로 추론
+            if not origin_country:
+                prov_name = (provider_info.get("name") or "").lower()
+                if any(cn in prov_name for cn in ["aliexpress", "cainiao", "yanwen", "yunexpress", "china"]):
+                    origin_country = "중국"
+                    origin_source = "provider.name"
+                    print(f"[API] ✅ Found origin from provider.name: {provider_info.get('name')} → 중국")
+            
+            # 3. 첫 이벤트의 타임존으로 추론
+            if not origin_country:
+                events = providers[0].get("events", [])
+                for e in events[:3]:  # 초기 3개 이벤트만
+                    time_raw = e.get("time_raw", {})
+                    tz = time_raw.get("timezone", "")
+                    if tz in ["+08:00", "+0800"]:
+                        desc = (e.get("description") or "").lower()
+                        if any(kw in desc for kw in ["shipped", "export", "departure"]):
+                            origin_country = "중국"
+                            origin_source = "timezone"
+                            print(f"[API] ✅ Found origin from timezone: +08:00 → 중국")
+                            break
 
-    # ✅ 프런트가 쓰는 보조 신호(any_events) + PRE_CUSTOMS 보정
+    # 정규화 및 요약
+    normalized = normalize_from_track(track or {})
+    summary = summarize_customs(normalized)
+    
     any_events = _count_raw_events(track or {}) > 0
     if summary.get("status") == "UNKNOWN" and any_events:
         summary["status"] = "PRE_CUSTOMS"
+
+    # details 추출 (이미 provider 우선순위가 적용됨)
+    details = _extract_details_best_effort_from_track(track or {}, tracking_number=number)
+    
+    # 강제 오버라이드 (백업)
+    if origin_country and (not details.get("origin_country")):
+        details["origin_country"] = origin_country
+        details["origin_country_source"] = f"OVERRIDE:{origin_source}"
+        print(f"[API] 🔧 Override applied: {origin_country}")
+
+    raw_provider_events = _extract_raw_provider_events_min(track or {})
 
     return {
         "ok": True,
@@ -765,8 +1153,15 @@ async def debug_normalize(number: str):
         "summary": summary,
         "normalized": normalized,
         "any_events": any_events,
-    }
+        "details": details,
+        "raw_provider_events": raw_provider_events,
+        "_debug": {
+            "provider_found": bool(providers) if track else False,
+            "origin_detected": origin_country,
+            "source": origin_source
+        }
 
+    }
 
 # =============== 테스트 페이로드/시뮬레이터 ===============
 # [ANCHOR: TEST_PAYLOAD]
@@ -799,14 +1194,19 @@ async def test_webhook(event: str = "TRACKING_UPDATED", number: str = "RB1234567
     payload = {"sign": sign, "event": event, "data": data}
     return payload
 
-
-
 def _serialize_normalized(ev_list):
     try:
-        return json.dumps([{"ts": e["ts"].isoformat(), "stage": e["stage"], "desc": e.get("desc", "")} for e in ev_list], ensure_ascii=False)
+        return json.dumps([
+            {
+                "ts": (e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"])),
+                "stage": e["stage"],
+                "desc": e.get("desc", ""),
+                "location": e.get("location", None),
+            } for e in ev_list
+        ], ensure_ascii=False)
     except Exception:
-        # fallback
         return json.dumps([], ensure_ascii=False)
+
 def _upsert_events_for_shipment(
     db,
     shipment_obj: Shipment,
@@ -938,11 +1338,15 @@ def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalize
             "clearance_status_text": _kcs_status_text(incoming_status),
             "progress_status_text": _kcs_status_text(incoming_status),
         }
-        # 최신 이벤트를 처리일시로
+        # 최신 이벤트 → 처리일시(이벤트기준)
         if normalized_events:
             latest = normalized_events[-1]
             if latest.get("ts"):
-                auto_patch["processed_at"] = latest["ts"] if isinstance(latest["ts"], str) else latest["ts"].isoformat()
+                auto_patch["event_processed_at"] = (
+                    latest["ts"] if isinstance(latest["ts"], str) else latest["ts"].isoformat()
+                )
+        # 동기화 기준 처리일시(업서트 수행 시각)
+        auto_patch["sync_processed_at"] = datetime.now(timezone.utc).isoformat()
 
         # 17TRACK payload에서 힌트 추출 (적재항/적출국 등)
         # upsert_shipment 호출부에서 track 객체가 없으니, 여기서는 생략하거나
@@ -1182,11 +1586,44 @@ def admin_get_shipment_details(number: str):
             arrival_port_name=row.arrival_port_name,
             arrival_date=_iso(row.arrival_date),
             tax_reference_date=_iso(row.tax_reference_date),
-            processed_at=_iso(row.processed_at),
+            event_processed_at=_iso(row.event_processed_at),
+            sync_processed_at=_iso(row.sync_processed_at),
             forwarder_name=row.forwarder_name,
             forwarder_phone=row.forwarder_phone,
             updated_at=_iso(row.updated_at),
         ).model_dump()
+
+
+# === DEBUG: 로컬 JSON을 그대로 넣어 정규화/요약/상세를 확인 ===
+# 검색어 앵커: [ANCHOR: DEBUG_FROM_JSON]
+from fastapi import Body
+
+@app.post("/debug/from-json")
+def debug_from_json(payload: dict = Body(...)):
+    """
+    업로드한 17TRACK v2 샘플(JSON)을 그대로 넣어 동작 확인.
+    - payload.track_info 가 있으면 우선 사용
+    - 없으면 payload 루트를 track_info처럼 취급
+    """
+    track = payload.get("track_info") or payload
+    normalized = normalize_from_track(track)
+    summary    = summarize_customs(normalized)
+    any_events = _count_raw_events(track) > 0
+    if summary.get("status") == "UNKNOWN" and any_events:
+        summary["status"] = "PRE_CUSTOMS"
+    details = _extract_details_best_effort_from_track(
+        track,
+        tracking_number=(payload.get("number") or (track.get("number") if isinstance(track, dict) else None))
+    )
+    raw_provider_events = _extract_raw_provider_events_min(track)
+    return {
+        "ok": True,
+        "summary": summary,
+        "normalized": normalized,
+        "any_events": any_events,
+        "details": details,
+        "raw_provider_events": raw_provider_events,  # [PATCH]
+    }
 
 @app.put("/admin/shipments/{number}/details")
 def admin_put_shipment_details(number: str, body: ShipmentDetailsIn):

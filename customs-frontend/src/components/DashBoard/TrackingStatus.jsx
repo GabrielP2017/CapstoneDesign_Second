@@ -4,25 +4,26 @@ import { getHealth, getNormalizedTracking, triggerTestWebhook } from '../../lib/
 
 // --- 상단 메타 객체들/유틸리티/작은 UI 컴포넌트 ---
 const STATUS_META = {
-CLEARED: { label: '통관 완료', badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' },
-IN_PROGRESS: { label: '통관 진행', badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' },
-DELAY: { label: '지연', badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' },
-PRE_CUSTOMS: { label: '통관 전(입항 대기)', badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
-UNKNOWN: { label: '확인 필요', badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
+ CLEARED:   { label: '통관 완료',       badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200' },
+ IN_PROGRESS: { label: '통관 진행',       badge: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' },
+ DELAY:    { label: '지연',          badge: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' },
+ PRE_CUSTOMS: { label: '통관 전(입항 대기)',   badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
+ UNKNOWN:   { label: '확인 필요',       badge: 'bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-200' },
 };
-const STAGE_META = { IN_PROGRESS: { label: '진행', dot: 'bg-blue-500' }, DELAY: { label: '지연', dot: 'bg-amber-500' }, CLEARED: { label: '완료', dot: 'bg-emerald-500' } };
+const STAGE_META = { IN_PROGRESS: { label: '운송', dot: 'bg-blue-500' }, DELAY: { label: '지연', dot: 'bg-amber-500' }, CLEARED: { label: '완료', dot: 'bg-emerald-500' } };
 const TIMELINE_DESC_TRANSLATIONS = {
-  'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
-  'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
-  'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
-  'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
-  'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
+ 'Export customs clearance started, Carrier note: Export customs clearance started': '수출 통관 절차가 시작되었습니다.',
+ 'Export customs clearance complete, Carrier note: Export clearance success': '수출 통관이 정상적으로 완료되었습니다.',
+ 'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
+ 'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
+ 'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
 };
 function formatDate(isoString, options = {}) {
   if (!isoString) return null;
-   const defaultOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+  const defaultOptions = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
   try { return new Date(isoString).toLocaleString('ko-KR', { ...defaultOptions, ...options }); } catch { return isoString; }
 }
+
 const toYYYYMMDD = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -30,6 +31,20 @@ const toYYYYMMDD = (date) => {
   return `${year}-${month}-${day}`;
 };
 const InfoItem = ({ label, value }) => ( <div className="flex justify-between items-center py-3 border-b border-slate-200/60 dark:border-slate-700/50 last:border-b-0"><dt className="text-sm text-slate-500 dark:text-slate-400">{label}</dt><dd className={`text-base font-medium text-right ${!value || value === '데이터 없음' ? 'text-slate-400 dark:text-slate-500 italic' : 'text-slate-800 dark:text-slate-100'}`}>{value || '—'}</dd></div> );
+
+function koCountry(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  const ISO2_TO_KO = {
+    CN:'중국', KR:'대한민국', JP:'일본', US:'미국', HK:'홍콩', TW:'대만',
+    SG:'싱가포르', MY:'말레이시아', TH:'태국', VN:'베트남', ID:'인도네시아',
+    DE:'독일', NL:'네덜란드', GB:'영국', FR:'프랑스', ES:'스페인',
+    IT:'이탈리아', PL:'폴란드', TR:'튀르키예', AE:'아랍에미리트'
+  };
+  // ISO2면 한글화, 아니면 원문(이미 '중국' 같은 케이스) 그대로 노출
+  return /^[A-Z]{2}$/.test(s) ? (ISO2_TO_KO[s] || s) : s;
+}
+
 const JourneyProgressBar = ({ summary, events }) => {
     const status = (summary?.status || 'UNKNOWN').toUpperCase();
     const hasExport = events.some(e => /export/i.test(e.desc));
@@ -61,26 +76,28 @@ const JourneyProgressBar = ({ summary, events }) => {
     );
 };
 const AnimatedBlock = ({ children, delay = 0, className = '' }) => {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
+ const [visible, setVisible] = useState(false);
+ useEffect(() => {
   setVisible(false);
-    const timer = setTimeout(() => setVisible(true), delay);
+  const timer = setTimeout(() => setVisible(true), delay);
   return () => clearTimeout(timer);
-  }, [delay, children]);
-  return ( <div className={`${className} transition-all duration-500 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>{children}</div> );
+ }, [delay, children]);
+ return ( <div className={`${className} transition-all duration-500 ease-out ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>{children}</div> );
 };
 
 // --- 메인 컴포넌트 ---
 export default function TrackingStatus() {
   // --- 상태 관리 (모두 통합) ---
   // 통관 조회 상태
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [summary, setSummary] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [anyEvents, setAnyEvents] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [health, setHealth] = useState({ state: 'checking', detail: null });
+ const [trackingNumber, setTrackingNumber] = useState('');
+ const [summary, setSummary] = useState(null);
+ const [events, setEvents] = useState([]);
+ const [rawProviderEvents, setRawProviderEvents] = useState([]);
+ const [anyEvents, setAnyEvents] = useState(false);
+ const [details, setDetails] = useState(null);
+ const [loading, setLoading] = useState(false);
+ const [error, setError] = useState('');
+ const [health, setHealth] = useState({ state: 'checking', detail: null });
   // 시뮬레이션 상태
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [prediction, setPrediction] = useState([]);
@@ -93,7 +110,7 @@ export default function TrackingStatus() {
   const RANDOMNESS_FACTOR = 0.2;
 
   // --- 핸들러 및 로직 (모두 통합) ---
-  useEffect(() => {
+ useEffect(() => {
     let ignore = false;
     getHealth()
       .then((res) => { if (!ignore) setHealth({ state: 'ok', detail: res }); })
@@ -101,7 +118,7 @@ export default function TrackingStatus() {
     return () => { ignore = true; };
   }, []);
   
-  const resetResult = () => {
+ const resetResult = () => {
     setTrackingNumber('');
     setSummary(null);
     setEvents([]);
@@ -110,7 +127,7 @@ export default function TrackingStatus() {
     setPrediction([]); // 시뮬레이션 결과도 함께 초기화
   };
 
-  const lookup = async (number) => {
+ const lookup = async (number) => {
     const trimmed = number.trim();
     if (!trimmed) {
       setError('운송장 번호를 입력하세요.');
@@ -123,7 +140,9 @@ export default function TrackingStatus() {
       const data = await getNormalizedTracking(trimmed);
       setSummary(data?.summary || null);
       setEvents(Array.isArray(data?.normalized) ? data.normalized : []);
+      setRawProviderEvents(Array.isArray(data?.raw_provider_events) ? data.raw_provider_events : []);
       setAnyEvents(Boolean(data?.any_events));
+      setDetails(data?.details || null);
     } catch (err) {
       setError(err.message || '조회 중 오류가 발생했어요.');
       setSummary(null);
@@ -132,8 +151,8 @@ export default function TrackingStatus() {
       setLoading(false);
     }
   };
-  const handleSubmit = (e) => { e.preventDefault(); lookup(trackingNumber); };
-  const handleSample = async () => {
+ const handleSubmit = (e) => { e.preventDefault(); lookup(trackingNumber); };
+ const handleSample = async () => {
       setLoading(true);
       setError('');
       try {
@@ -152,7 +171,7 @@ export default function TrackingStatus() {
         setLoading(false);
       }
   };
-  const handleIncompleteTest = () => {
+ const handleIncompleteTest = () => {
     setLoading(true);
     setError('');
     const mockPreCustomsData = {
@@ -170,9 +189,9 @@ export default function TrackingStatus() {
   };
 
   // 시뮬레이션 관련 로직
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const minDate = toYYYYMMDD(today);
+ const today = new Date();
+ today.setHours(0, 0, 0, 0);
+ const minDate = toYYYYMMDD(today);
 
   const dateRange = Array.from({ length: 5 }).map((_, i) => {
     const date = new Date(selectedDate);
@@ -260,9 +279,81 @@ export default function TrackingStatus() {
   const highestProbabilityInView = Math.max(...probabilities, 0);
   const lowestProbabilityInView = Math.min(...probabilities, 0);
 
-  const statusKey = (summary?.status || 'UNKNOWN').toUpperCase();
+const statusKey = (summary?.status || 'UNKNOWN').toUpperCase();
 
-  return (
+// [PATCH] normalized가 비고, 원시 이벤트는 있는 경우 → 가상 진행 이벤트로 변환(장소 포함)
+const needsTransitFallback =
+  (!events || events.length === 0) &&
+  anyEvents &&
+  (statusKey === 'PRE_CUSTOMS' || statusKey === 'UNKNOWN');
+
+const fallbackFromRaw = needsTransitFallback
+  ? (rawProviderEvents || [])
+      .filter(e => e && (e.ts || e.desc || e.location))
+      .slice(-5)
+      .map(e => ({
+        ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()),
+        stage: 'IN_PROGRESS',
+        // ✅ desc는 순수 설명만, 장소는 별도 필드
+        desc: e?.desc || '이동',
+        location: e?.location || null,
+      }))
+  : [];
+
+// 1) 정규화 이벤트에 location 필드가 추가되었으므로 그대로 사용
+const normalizedWithLoc = Array.isArray(events)
+  ? events.map(e => ({
+      ts: e.ts,
+      stage: e.stage,
+      desc: e.desc || null,
+      location: e.location || null,
+    }))
+  : [];
+
+// 2) raw 중 정규화의 마지막 시각 이후만 병합(최신 일반 운송 반영)
+const lastNormTs = normalizedWithLoc.length > 0
+  ? normalizedWithLoc[normalizedWithLoc.length - 1].ts
+  : null;
+
+const rawTail = (rawProviderEvents || [])
+  .filter(e => e && (e.ts || e.desc || e.location))
+  .filter(e => !lastNormTs || (e.ts && new Date(e.ts) > new Date(lastNormTs)))
+  .map(e => ({
+    ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()),
+    stage: 'IN_PROGRESS',
+    desc: e.desc || '이동',
+    location: e.location || null,
+  }));
+
+const viewEvents = (() => {
+  if (normalizedWithLoc.length > 0) {
+    // 1) 우선 normalized 그대로
+    const merged = [...normalizedWithLoc];
+
+    // 2) rawTail에서 동일(ts+desc) 이벤트 찾아 location만 채움
+    for (const r of rawTail) {
+      const i = merged.findIndex(x =>
+        x.ts === r.ts && ((x.desc || '') === (r.desc || ''))
+      );
+      if (i >= 0 && !merged[i].location && r.location) {
+        merged[i] = { ...merged[i], location: r.location };
+      }
+    }
+    return merged;
+  }
+  if (fallbackFromRaw && fallbackFromRaw.length > 0) return fallbackFromRaw;
+  if (needsTransitFallback) {
+    return [{
+      ts: details?.event_processed_at || details?.sync_processed_at || new Date().toISOString(),
+      stage: 'IN_PROGRESS',
+      desc: '이동',
+      location: details?.last_location || null
+    }];
+  }
+  return [];
+})();
+
+ return (
     <div className='bg-white/80 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-700/50 rounded-2xl p-6 shadow-sm'>
         <div className='flex flex-col gap-2 mb-6'>
             <div className='flex items-center justify-between'>
@@ -377,7 +468,7 @@ export default function TrackingStatus() {
                             </h4>
                             <div className='rounded-xl border border-slate-200/60 bg-white/70 dark:border-slate-700/60 dark:bg-slate-900/40 flex-1 flex flex-col'>
                                 <div className="p-4 border-b border-slate-200/60 dark:border-slate-700/50">
-                                    <JourneyProgressBar summary={summary} events={events} />
+                                    <JourneyProgressBar summary={summary} events={viewEvents} />
                                 </div>
                                 <div className="p-4 flex-1">
                                     <dl>
@@ -395,10 +486,29 @@ export default function TrackingStatus() {
                                                 </div>
                                             </div>
                                         ) : ( <InfoItem label="지연 상태" value="지연 없음" /> )}
-                                        <InfoItem label="적출국" value="데이터 없음" />
-                                        <InfoItem label="현지 출항 완료" value={formatDate(events.find(e => /export.*complete/i.test(e.desc))?.ts)} />
-                                        <InfoItem label="한국 도착 (통관 대기)" value={formatDate(summary.in_progress_at)} />
-                                        <InfoItem label="통관 완료 (배송 준비 중)" value={formatDate(summary.cleared_at)} />
+                                        <InfoItem label="적출국"
+                                          value={
+                                            (details && typeof details.origin_country !== 'undefined' && String(details.origin_country).trim() !== '')
+                                              ? koCountry(details.origin_country)
+                                              : '데이터 없음'
+                                          }
+                                        />
+                                        <InfoItem
+                                          label="입항일"
+                                          value={details?.arrival_date
+                                            ? formatDate(details.arrival_date, { hour: undefined, minute: undefined })
+                                            : '데이터 없음'}
+                                        />
+
+                                        {/* ▼ 변경: 처리일시 2종 분리 (이벤트/동기화 기준) */}
+                                        <InfoItem
+                                          label="처리일시(이벤트기준)"
+                                          value={formatDate(details?.event_processed_at)}
+                                        />
+                                        <InfoItem
+                                          label="처리일시(동기화기준)"
+                                          value={formatDate(details?.sync_processed_at)}
+                                        />
                                     </dl>
                                 </div>
                             </div>
@@ -408,21 +518,34 @@ export default function TrackingStatus() {
                         <div className='space-y-3'>
                             <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-200'>처리 타임라인</h4>
                             <ul className='space-y-3'>
-                                {events.length > 0 ? (
-                                    events.map((eventItem, index) => {
-                                        const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
-                                        const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
-                                        return ( <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'><span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/><div className='flex-1'><p className='text-xs font-semibold text-slate-500 dark:text-slate-300'>{stage.label} · {formatDate(eventItem.ts)}</p><p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>{translatedDesc || '설명 없음'}</p></div></li> );
-                                    })
-                                ) : (
-                                    <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
-                                        {statusKey === 'PRE_CUSTOMS' || events.some(e => /export/i.test(e.desc))
-                                            ? '통관/배송 이벤트 대기 중'
-                                            : anyEvents
-                                                ? '통관 키워드에 해당하는 이벤트가 아직 없습니다.'
-                                                : '표시할 이벤트가 없습니다.'}
+                              {viewEvents.length > 0 ? (
+                                viewEvents.map((eventItem, index) => {
+                                  const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
+                                  const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
+                                  return (
+                                    <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'>
+                                      <span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/>
+                                      <div className='flex-1'>
+                                        <p className='text-xs font-semibold text-slate-500 dark:text-slate-300'>
+                                          {stage.label} · {formatDate(eventItem.ts)}
+                                        </p>
+                                        <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>
+                                          {translatedDesc || '설명 없음'}
+                                          {eventItem?.location
+                                            ? <span className='text-slate-500 dark:text-slate-400'> · {eventItem.location}</span>
+                                            : null}
+                                        </p>
+                                      </div>
                                     </li>
-                                )}
+                                  );
+                                })
+                              ) : (
+                                <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
+                                  {anyEvents
+                                    ? '통관 키워드에 해당하지 않는 일반 배송 이벤트만 감지됨 (운송중)'
+                                    : '표시할 이벤트가 없습니다.'}
+                                </li>
+                              )}
                             </ul>
                         </div>
                     </AnimatedBlock>
@@ -430,5 +553,5 @@ export default function TrackingStatus() {
             </div>
         )}
     </div>
-  );
+ );
 }
