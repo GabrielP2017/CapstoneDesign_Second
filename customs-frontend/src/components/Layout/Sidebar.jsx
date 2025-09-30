@@ -11,9 +11,9 @@ import {
   Settings,
   ShoppingBag,
   Users,
-  ChevronLeft,
 } from "lucide-react";
 
+// (menuItems, submenuParentMap 코드는 이전과 동일하여 생략)
 const menuItems = [
     { id: "dashboard", icon: LayoutDashboard, label: "대쉬보드", active: true, badge: "New" },
     { id: "admin", icon: Settings, label: "관리자", submenu: [{ id: "admin.shipments", label: "화물관리" }] },
@@ -40,7 +40,6 @@ menuItems.forEach(item => {
 
 function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
   const [expandedItemId, setExpandedItemId] = useState(null);
-  const [isHovered, setIsHovered] = useState(false);
   const [openPopup, setOpenPopup] = useState(null); 
 
   const activePopupItem = useMemo(() => {
@@ -48,32 +47,25 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
     return menuItems.find(item => item.id === openPopup.id);
   }, [openPopup, collapsed]);
 
+  const handleMouseEnter = () => {
+    if (collapsed) {
+      onToggle();
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (!collapsed) {
+      onToggle();
+    }
+  };
+
   return (
     <div
       className="relative h-full"
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
-      <div className={`${collapsed ? "w-20" : "w-72"} h-full transition-all duration-300 ease-in-out`}>
-        <button 
-          onClick={onToggle}
-          className={`absolute top-1/2 left-full -translate-y-1/2 z-40 
-                    w-12 h-90 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl
-                    rounded-r-full shadow-lg
-                    flex items-center justify-center
-                    text-slate-500 dark:text-slate-400 
-                    hover:text-blue-500 dark:hover:text-blue-400
-                    focus:text-black dark:focus:text-white
-                    transition-all duration-300 ease-in-out 
-                    focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent 
-                    focus:ring-black dark:focus:ring-white
-                    group
-                    ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-          aria-label="Toggle sidebar"
-        >
-          <ChevronLeft className={`w-6 h-6 transition-transform duration-300 group-hover:scale-110 ${collapsed ? 'rotate-180' : ''}`} />
-        </button>
-
+      <div className={`${collapsed ? "w-20" : "w-72"} h-full transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]`}>
         <div className={`relative z-50 w-full h-full flex flex-col
                          bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl
                          border-r border-slate-200 dark:border-slate-700
@@ -93,8 +85,8 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                 return (
                   <React.Fragment key={item.id}>
                     <button
-                      className={`w-full flex items-center p-3 rounded-xl transition-all duration-200 ${
-                        collapsed ? 'justify-center' : 'justify-between'
+                      className={`w-full flex items-center p-3 rounded-xl transition-colors duration-200 ${
+                        collapsed ? 'justify-center' : ''
                       } ${
                         isActive ? activeStyle : (isPopupActive ? popupActiveStyle : defaultStyle)
                       }`}
@@ -110,24 +102,28 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                           if (item.submenu) {
                             setExpandedItemId(prevId => prevId === item.id ? null : item.id);
                           } else {
-                            // ▼▼▼ [수정됨] 다른 메뉴 클릭 시 열려있던 아코디언 닫기 ▼▼▼
                             setExpandedItemId(null);
                             onPageChange(item.id);
                           }
                         }
                       }}
                     >
-                      <div className="flex items-center space-x-3">
-                        <item.icon className="w-5 h-5" />
-                        {!collapsed && (
-                          <>
-                            <span className="font-medium text-sm">{item.label}</span>
-                            {item.badge && <span className="px-2 py-0.5 text-xs bg-red-500 text-white rounded-full">{item.badge}</span>}
-                            {item.count && <span className="px-2 py-0.5 text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full">{item.count}</span>}
-                          </>
-                        )}
+                      {/* ▼▼▼ [수정됨] 아이콘과 나머지 컨텐츠를 분리하여 레이아웃을 확실하게 제어합니다. ▼▼▼ */}
+                      <item.icon className="w-5 h-5 shrink-0" />
+                      
+                      {/* 글자, 뱃지, 화살표를 포함하는 컨테이너 */}
+                      <div
+                        className={`flex items-center justify-between overflow-hidden transition-all duration-200 ${
+                          collapsed ? 'w-0 opacity-0' : 'flex-1 ml-3'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2 whitespace-nowrap">
+                          <span className="font-medium text-sm">{item.label}</span>
+                          {item.badge && <span className="px-2 py-0.5 text-xs bg-red-500 text-white rounded-full">{item.badge}</span>}
+                          {item.count && <span className="px-2 py-0.5 text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-full">{item.count}</span>}
+                        </div>
+                        {item.submenu && <ChevronDown className={`w-4 h-4 transition-transform ${expandedItemId === item.id ? 'rotate-180' : ''}`} />}
                       </div>
-                      {!collapsed && item.submenu && <ChevronDown className={`w-4 h-4 transition-transform ${expandedItemId === item.id ? 'rotate-180' : ''}`} />}
                     </button>
                     
                     <div className={`transition-all duration-300 ease-in-out overflow-hidden ${expandedItemId === item.id && !collapsed ? 'max-h-96' : 'max-h-0'}`}>
@@ -154,15 +150,17 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
           </div>
 
           <div className="p-4 border-t border-slate-200/50 dark:border-slate-700/50">
-            <div className={`${collapsed ? 'hidden' : 'flex'} items-center space-x-3 rounded-xl mt-2`}>
-              <img
-                src="https://mblogthumb-phinf.pstatic.net/MjAyMDAyMTBfODAg/MDAxNTgxMzA0MTE penthouse3833.ACRLtB9v5NH-I2qjWrwiXLb7TeUiG442cJmcdzVum7cg.eTLpNg_n0rAS5sWOsofRrvBy0qZk_QcWSfUiIagTfd8g.JPEG.lattepain/1581304118739.jpg?type=w800"
-                alt="user"
-                className="w-10 h-10 rounded-full ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-blue-500"
-              />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-slate-800 dark:text-white truncate">차민욱</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">프론트엔드 총관리자 및 웹 디자이너</p>
+            <div className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+              <div className="flex items-center space-x-3 rounded-xl mt-2">
+                <img
+                  src="https://mblogthumb-phinf.pstatic.net/MjAyMDAyMTBfODAg/MDAxNTgxMzA0MTE penthouse3833.ACRLtB9v5NH-I2qjWrwiXLb7TeUiG442cJmcdzVum7cg.eTLpNg_n0rAS5sWOsofRrvBy0qZk_QcWSfUiIagTfd8g.JPEG.lattepain/1581304118739.jpg?type=w800"
+                  alt="user"
+                  className="w-10 h-10 rounded-full ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-blue-500"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800 dark:text-white truncate">차민욱</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">프론트엔드 총관리자 및 웹 디자이너</p>
+                </div>
               </div>
             </div>
           </div>
