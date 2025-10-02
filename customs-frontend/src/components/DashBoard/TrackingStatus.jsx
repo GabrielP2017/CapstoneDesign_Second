@@ -17,6 +17,8 @@ const TIMELINE_DESC_TRANSLATIONS = {
  'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
  'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
  'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
+ 'Package delivered, Carrier note: 고객님의 상품이 배송완료 되었습니다.': '배송이 완료되었습니다.',
+ '出口海关/放行': '수출 통관 완료',
 };
 function formatDate(isoString, options = {}) {
   if (!isoString) return null;
@@ -41,13 +43,12 @@ function koCountry(v) {
     DE:'독일', NL:'네덜란드', GB:'영국', FR:'프랑스', ES:'스페인',
     IT:'이탈리아', PL:'폴란드', TR:'튀르키예', AE:'아랍에미리트'
   };
-  // ISO2면 한글화, 아니면 원문(이미 '중국' 같은 케이스) 그대로 노출
   return /^[A-Z]{2}$/.test(s) ? (ISO2_TO_KO[s] || s) : s;
 }
 
 const JourneyProgressBar = ({ summary, events }) => {
     const status = (summary?.status || 'UNKNOWN').toUpperCase();
-    const hasExport = events.some(e => /export/i.test(e.desc));
+    const hasExport = events.some(e => /export/i.test(e.desc) || (e.desc && e.desc.includes('出口海关/放行')));
     const hasImport = events.some(e => /import/i.test(e.desc));
     const isCleared = status === 'CLEARED';
     let currentLevel = 0;
@@ -87,8 +88,6 @@ const AnimatedBlock = ({ children, delay = 0, className = '' }) => {
 
 // --- 메인 컴포넌트 ---
 export default function TrackingStatus() {
-  // --- 상태 관리 (모두 통합) ---
-  // 통관 조회 상태
  const [trackingNumber, setTrackingNumber] = useState('');
  const [summary, setSummary] = useState(null);
  const [events, setEvents] = useState([]);
@@ -98,18 +97,15 @@ export default function TrackingStatus() {
  const [loading, setLoading] = useState(false);
  const [error, setError] = useState('');
  const [health, setHealth] = useState({ state: 'checking', detail: null });
-  // 시뮬레이션 상태
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [prediction, setPrediction] = useState([]);
+ const [selectedDate, setSelectedDate] = useState(new Date());
+ const [prediction, setPrediction] = useState([]);
 
-  // --- 더미 데이터 및 상수 ---
   const MOCK_DATA_DISTRIBUTION = {
     transit: [ { days: 4, probability: 0.15 }, { days: 5, probability: 0.50 }, { days: 6, probability: 0.25 }, { days: 7, probability: 0.10 } ],
     clearance: [ { days: 1, probability: 0.20 }, { days: 2, probability: 0.70 }, { days: 3, probability: 0.10 } ]
   };
   const RANDOMNESS_FACTOR = 0.2;
 
-  // --- 핸들러 및 로직 (모두 통합) ---
  useEffect(() => {
     let ignore = false;
     getHealth()
@@ -124,7 +120,7 @@ export default function TrackingStatus() {
     setEvents([]);
     setAnyEvents(false);
     setError('');
-    setPrediction([]); // 시뮬레이션 결과도 함께 초기화
+    setPrediction([]);
   };
 
  const lookup = async (number) => {
@@ -188,16 +184,9 @@ export default function TrackingStatus() {
     }, 500);
   };
 
-  // 시뮬레이션 관련 로직
  const today = new Date();
  today.setHours(0, 0, 0, 0);
  const minDate = toYYYYMMDD(today);
-
-  const dateRange = Array.from({ length: 5 }).map((_, i) => {
-    const date = new Date(selectedDate);
-    date.setDate(selectedDate.getDate() + (i - 2));
-    return date;
-  });
 
   const handleDateChange = (e) => {
     const [year, month, day] = e.target.value.split('-').map(Number);
@@ -251,90 +240,37 @@ export default function TrackingStatus() {
   };
   const handleResetSimulation = () => { setPrediction([]); };
   
-  // --- ▼▼▼ (수정) 그라데이션 색상을 위한 스타일 객체 반환 함수 ▼▼▼ ---
   const getStyleForProbability = (probability, minProb, maxProb) => {
     const range = maxProb - minProb;
-
-    // 모든 값이 같을 경우 (range가 0일 때) 오류 방지 및 초록색으로 통일
-    if (range === 0) {
-      return { color: 'hsl(120, 95%, 45%)' }; 
-    }
-
-    // 현재 확률이 최소-최대 범위에서 차지하는 상대적 위치를 0~1 사이의 값으로 계산 (정규화)
+    if (range === 0) return { color: 'hsl(120, 95%, 45%)' };
     const relativeProb = (probability - minProb) / range;
-
-    // 상대 위치(0~1)를 HSL의 색상(Hue) 값(0~120)으로 변환 (0=빨강, 120=초록)
     const hue = relativeProb * 120;
     const saturation = 95;
     const lightness = 45;
-
-    return {
-      color: `hsl(${hue}, ${saturation}%, ${lightness}%)`
-    };
+    return { color: `hsl(${hue}, ${saturation}%, ${lightness}%)` };
   };
-  // --- ▲▲▲ ---
   
-  // 렌더링 전에 현재 예측값들의 최소/최대치를 계산
   const probabilities = prediction.map(p => p.probability);
   const highestProbabilityInView = Math.max(...probabilities, 0);
   const lowestProbabilityInView = Math.min(...probabilities, 0);
 
 const statusKey = (summary?.status || 'UNKNOWN').toUpperCase();
 
-// [PATCH] normalized가 비고, 원시 이벤트는 있는 경우 → 가상 진행 이벤트로 변환(장소 포함)
-const needsTransitFallback =
-  (!events || events.length === 0) &&
-  anyEvents &&
-  (statusKey === 'PRE_CUSTOMS' || statusKey === 'UNKNOWN');
+const needsTransitFallback = (!events || events.length === 0) && anyEvents && (statusKey === 'PRE_CUSTOMS' || statusKey === 'UNKNOWN');
 
 const fallbackFromRaw = needsTransitFallback
-  ? (rawProviderEvents || [])
-      .filter(e => e && (e.ts || e.desc || e.location))
-      .slice(-5)
-      .map(e => ({
-        ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()),
-        stage: 'IN_PROGRESS',
-        // ✅ desc는 순수 설명만, 장소는 별도 필드
-        desc: e?.desc || '이동',
-        location: e?.location || null,
-      }))
+  ? (rawProviderEvents || []).filter(e => e && (e.ts || e.desc || e.location)).slice(-5).map(e => ({ ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()), stage: 'IN_PROGRESS', desc: e?.desc || '이동', location: e?.location || null, }))
   : [];
 
-// 1) 정규화 이벤트에 location 필드가 추가되었으므로 그대로 사용
-const normalizedWithLoc = Array.isArray(events)
-  ? events.map(e => ({
-      ts: e.ts,
-      stage: e.stage,
-      desc: e.desc || null,
-      location: e.location || null,
-    }))
-  : [];
-
-// 2) raw 중 정규화의 마지막 시각 이후만 병합(최신 일반 운송 반영)
-const lastNormTs = normalizedWithLoc.length > 0
-  ? normalizedWithLoc[normalizedWithLoc.length - 1].ts
-  : null;
-
-const rawTail = (rawProviderEvents || [])
-  .filter(e => e && (e.ts || e.desc || e.location))
-  .filter(e => !lastNormTs || (e.ts && new Date(e.ts) > new Date(lastNormTs)))
-  .map(e => ({
-    ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()),
-    stage: 'IN_PROGRESS',
-    desc: e.desc || '이동',
-    location: e.location || null,
-  }));
+const normalizedWithLoc = Array.isArray(events) ? events.map(e => ({ ts: e.ts, stage: e.stage, desc: e.desc || null, location: e.location || null, })) : [];
+const lastNormTs = normalizedWithLoc.length > 0 ? normalizedWithLoc[normalizedWithLoc.length - 1].ts : null;
+const rawTail = (rawProviderEvents || []).filter(e => e && (e.ts || e.desc || e.location)).filter(e => !lastNormTs || (e.ts && new Date(e.ts) > new Date(lastNormTs))).map(e => ({ ts: e.ts || (details?.event_processed_at || details?.sync_processed_at || new Date().toISOString()), stage: 'IN_PROGRESS', desc: e.desc || '이동', location: e.location || null, }));
 
 const viewEvents = (() => {
   if (normalizedWithLoc.length > 0) {
-    // 1) 우선 normalized 그대로
     const merged = [...normalizedWithLoc];
-
-    // 2) rawTail에서 동일(ts+desc) 이벤트 찾아 location만 채움
     for (const r of rawTail) {
-      const i = merged.findIndex(x =>
-        x.ts === r.ts && ((x.desc || '') === (r.desc || ''))
-      );
+      const i = merged.findIndex(x => x.ts === r.ts && ((x.desc || '') === (r.desc || '')));
       if (i >= 0 && !merged[i].location && r.location) {
         merged[i] = { ...merged[i], location: r.location };
       }
@@ -343,12 +279,7 @@ const viewEvents = (() => {
   }
   if (fallbackFromRaw && fallbackFromRaw.length > 0) return fallbackFromRaw;
   if (needsTransitFallback) {
-    return [{
-      ts: details?.event_processed_at || details?.sync_processed_at || new Date().toISOString(),
-      stage: 'IN_PROGRESS',
-      desc: '이동',
-      location: details?.last_location || null
-    }];
+    return [{ ts: details?.event_processed_at || details?.sync_processed_at || new Date().toISOString(), stage: 'IN_PROGRESS', desc: '이동', location: details?.last_location || null }];
   }
   return [];
 })();
@@ -372,14 +303,7 @@ const viewEvents = (() => {
             <div className='flex flex-col gap-3 md:flex-row'>
                 <label className='flex-1 block'>
                     <span className='text-xs font-medium text-slate-500 dark:text-slate-400'>운송장 번호</span>
-                    <input
-                        type='text'
-                        value={trackingNumber}
-                        onChange={(e) => setTrackingNumber(e.target.value)}
-                        placeholder='예: RB123456789CN'
-                        className='mt-1 w-full rounded-lg border border-slate-200/70 dark:border-slate-700 bg-white/90 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500'
-                        disabled={loading}
-                    />
+                    <input type='text' value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder='예: RB123456789CN' className='mt-1 w-full rounded-lg border border-slate-200/70 dark:border-slate-700 bg-white/90 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500' disabled={loading} />
                 </label>
                 <div className='flex gap-2 items-end flex-wrap'>
                     <button type='submit' className='inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60' disabled={loading}>
@@ -404,13 +328,9 @@ const viewEvents = (() => {
                 <AnimatedBlock>
                   <div className="border-t border-slate-200/60 dark:border-slate-700/50 pt-6 space-y-4">
                     <div>
-                      <h4 className="text-lg font-semibold text-slate-800 dark:text-slate-50 mb-2">
-                        화물 도착일 시뮬레이션
-                      </h4>
                       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
                         <div className="relative">
-                          <label htmlFor="date-picker" className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          </label>
+                          <label htmlFor="date-picker" className="text-xs font-medium text-slate-500 dark:text-slate-400">예상 출발 날짜 선택</label>
                           <input
                             id="date-picker" type="date" min={minDate} value={toYYYYMMDD(selectedDate)} onChange={handleDateChange}
                             className="mt-1 w-full sm:w-auto rounded-lg border border-slate-200/70 dark:border-slate-700 bg-white/90 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3 py-2 text-sm shadow-inner focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -430,13 +350,34 @@ const viewEvents = (() => {
                     {prediction.length > 0 && (
                       <div className="border-t border-slate-200/60 dark:border-slate-700/50 pt-4 mt-4">
                         <AnimatedBlock>
-                          <div className="flex bg-slate-50/70 dark:bg-slate-800/60 p-2 rounded-xl text-center">
+                           {/* ▼▼▼ (수정) 전체적인 레이아웃 및 크기 비율 조정 ▼▼▼ */}
+                          <div className="flex justify-center">
+                            <div className="flex w-full bg-slate-50/70 dark:bg-slate-800/60 p-2 rounded-xl text-center">
+                               {/* 추가 정보 1 (flex-grow-2로 더 넓게) */}
+                              <div className="flex-1 flex-grow-2 py-2 px-1 border-r border-slate-200/60 dark:border-slate-700/50">
+                                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                                  추가 정보 1
+                                </p>
+                                <p className="text-lg font-bold mt-1 text-slate-400 dark:text-slate-500">
+                                  -
+                                </p>
+                              </div>
+                               {/* 추가 정보 2 (flex-grow-2로 더 넓게) */}
+                              <div className="flex-1 flex-grow-2 py-2 px-1 border-r border-slate-200/60 dark:border-slate-700/50">
+                                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
+                                  추가 정보 2
+                                </p>
+                                <p className="text-lg font-bold mt-1 text-slate-400 dark:text-slate-500">
+                                  -
+                                </p>
+                              </div>
+                              
+                              {/* 날짜 예측 부분 (flex-grow-1로 상대적으로 좁게) */}
                               {prediction.map(({ date, probability }, index) => {
-                                  const isHighest = probability === highestProbabilityInView && probability > 0;
                                   return (
                                       <div 
                                           key={date.toISOString()}
-                                          className={`flex-1 py-2 px-1 ${ index < prediction.length - 1 ? 'border-r border-slate-200/60 dark:border-slate-700/50' : '' }`}
+                                          className={`flex-1 flex-grow py-2 px-1 ${ index < prediction.length - 1 ? 'border-r border-slate-200/60 dark:border-slate-700/50' : '' }`}
                                       >
                                           <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
                                               {date.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit', weekday: 'short' })}
@@ -450,7 +391,9 @@ const viewEvents = (() => {
                                       </div>
                                   );
                               })}
+                            </div>
                           </div>
+                           {/* ▲▲▲ */}
                           <p className="text-xs text-slate-400 dark:text-slate-500 mt-3 text-right">
                             * 가장 확률 높은 날의 좌우 2일 예측치
                           </p>
@@ -486,29 +429,10 @@ const viewEvents = (() => {
                                                 </div>
                                             </div>
                                         ) : ( <InfoItem label="지연 상태" value="지연 없음" /> )}
-                                        <InfoItem label="적출국"
-                                          value={
-                                            (details && typeof details.origin_country !== 'undefined' && String(details.origin_country).trim() !== '')
-                                              ? koCountry(details.origin_country)
-                                              : '데이터 없음'
-                                          }
-                                        />
-                                        <InfoItem
-                                          label="입항일"
-                                          value={details?.arrival_date
-                                            ? formatDate(details.arrival_date, { hour: undefined, minute: undefined })
-                                            : '데이터 없음'}
-                                        />
-
-                                        {/* ▼ 변경: 처리일시 2종 분리 (이벤트/동기화 기준) */}
-                                        <InfoItem
-                                          label="처리일시(이벤트기준)"
-                                          value={formatDate(details?.event_processed_at)}
-                                        />
-                                        <InfoItem
-                                          label="처리일시(동기화기준)"
-                                          value={formatDate(details?.sync_processed_at)}
-                                        />
+                                        <InfoItem label="적출국" value={(details && typeof details.origin_country !== 'undefined' && String(details.origin_country).trim() !== '') ? koCountry(details.origin_country) : '데이터 없음'} />
+                                        <InfoItem label="입항일" value={details?.arrival_date ? formatDate(details.arrival_date, { hour: undefined, minute: undefined }) : '데이터 없음'} />
+                                        <InfoItem label="처리일시(이벤트기준)" value={formatDate(details?.event_processed_at)} />
+                                        <InfoItem label="처리일시(동기화기준)" value={formatDate(details?.sync_processed_at)} />
                                     </dl>
                                 </div>
                             </div>
@@ -521,7 +445,17 @@ const viewEvents = (() => {
                               {viewEvents.length > 0 ? (
                                 viewEvents.map((eventItem, index) => {
                                   const stage = STAGE_META[eventItem.stage] || { label: eventItem.stage, dot: 'bg-slate-400' };
-                                  const translatedDesc = TIMELINE_DESC_TRANSLATIONS[eventItem.desc] || eventItem.desc;
+                                  const findTranslation = (description) => {
+                                    if (!description) return '설명 없음';
+                                    const matchingKey = Object.keys(TIMELINE_DESC_TRANSLATIONS).find(key => description.startsWith(key));
+                                    if (matchingKey) {
+                                      const translation = TIMELINE_DESC_TRANSLATIONS[matchingKey];
+                                      const dynamicPart = description.slice(matchingKey.length);
+                                      return translation + dynamicPart;
+                                    }
+                                    return description;
+                                  };
+                                  const translatedDesc = findTranslation(eventItem.desc);
                                   return (
                                     <li key={`${eventItem.stage}-${index}`} className='flex items-start gap-3 rounded-xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-700/60 dark:bg-slate-900/40'>
                                       <span className={`mt-1 h-2.5 w-2.5 rounded-full ${stage.dot}`}/>
@@ -530,10 +464,8 @@ const viewEvents = (() => {
                                           {stage.label} · {formatDate(eventItem.ts)}
                                         </p>
                                         <p className='mt-1 text-sm text-slate-700 dark:text-slate-100'>
-                                          {translatedDesc || '설명 없음'}
-                                          {eventItem?.location
-                                            ? <span className='text-slate-500 dark:text-slate-400'> · {eventItem.location}</span>
-                                            : null}
+                                          {translatedDesc}
+                                          {eventItem?.location ? <span className='text-slate-500 dark:text-slate-400'> · {eventItem.location}</span> : null}
                                         </p>
                                       </div>
                                     </li>
@@ -541,9 +473,7 @@ const viewEvents = (() => {
                                 })
                               ) : (
                                 <li className='rounded-xl border border-slate-200/60 bg-white/70 p-3 text-sm text-slate-500 dark:border-slate-700/60 dark:bg-slate-900/40 dark:text-slate-200'>
-                                  {anyEvents
-                                    ? '통관 키워드에 해당하지 않는 일반 배송 이벤트만 감지됨 (운송중)'
-                                    : '표시할 이벤트가 없습니다.'}
+                                  {anyEvents ? '통관 키워드에 해당하지 않는 일반 배송 이벤트만 감지됨 (운송중)' : '표시할 이벤트가 없습니다.'}
                                 </li>
                               )}
                             </ul>
@@ -555,3 +485,4 @@ const viewEvents = (() => {
     </div>
  );
 }
+

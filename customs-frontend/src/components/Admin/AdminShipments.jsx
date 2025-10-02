@@ -4,7 +4,6 @@ import { ChevronDown, ChevronRight, Clock, AlertTriangle, CheckCircle, Loader2 a
 import { adminSyncFromFile } from "../../lib/api";
 
 // Loader 아이콘
-
 const Loader2 = (props) => (
   <svg {...props} viewBox="0 0 24 24" className={`animate-spin ${props.className || ""}`}>
     <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity="0.25" />
@@ -41,6 +40,8 @@ const TIMELINE_DESC_TRANSLATIONS = {
   'Import customs clearance started, Carrier note: Import clearance start': '수입 통관 절차가 시작되었습니다.',
   'Import customs clearance delay.Package is held temporarily, Carrier note: Package is held temporarily': '통관 지연: 세관에서 화물을 일시 보류 중입니다.',
   'Import customs clearance complete, Carrier note: Import customs clearance complete': '수입 통관이 정상적으로 완료되었습니다.',
+  'Package delivered, Carrier note: 고객님의 상품이 배송완료 되었습니다.': '배송이 완료되었습니다.',
+  '出口海关/放行': '수출 통관 완료',
 };
 
 function formatDate(v) {
@@ -59,12 +60,6 @@ function formatDate(v) {
     return "-";
   }
 }
-
-// // 간단 날짜 포맷터
-// function formatDate(s) {
-//   if (!s) return "-";
-//   try { return new Date(s).toLocaleString(); } catch { return String(s); }
-// }
 
 const LABELS = {
   product_info: "물품 정보",
@@ -161,10 +156,9 @@ export default function AdminShipments() {
   const [syncResult, setSyncResult] = useState(null);
   const [error, setError] = useState("");
   
-  // [NEW] 펼침 상태 & 이벤트 캐시
   const [expanded, setExpanded] = useState(() => new Set());
-  const [eventsMap, setEventsMap] = useState(() => new Map()); // number -> events[]
-  const [eventsLoading, setEventsLoading] = useState(() => new Set()); // 로딩중 번호
+  const [eventsMap, setEventsMap] = useState(() => new Map());
+  const [eventsLoading, setEventsLoading] = useState(() => new Set());
 
   const [detailsMap, setDetailsMap] = useState(() => new Map());
   const [detailsLoading, setDetailsLoading] = useState(() => new Set());
@@ -220,7 +214,7 @@ export default function AdminShipments() {
     const next = new Set(expanded);
     if (next.has(number)) { next.delete(number); setExpanded(next); return; }
     next.add(number); setExpanded(next);
-    // 이벤트 & 상세 동시 프리패치
+
     if (!eventsMap.has(number) && !eventsLoading.has(number)) {
       const s = new Set(eventsLoading); s.add(number); setEventsLoading(s);
       adminGetShipmentEvents(number)
@@ -231,6 +225,21 @@ export default function AdminShipments() {
   };
 
   const isEmpty = !loading && rows.length === 0;
+
+  const findTranslation = (description) => {
+    if (!description) return "";
+
+    const matchingKey = Object.keys(TIMELINE_DESC_TRANSLATIONS)
+      .find(key => description.startsWith(key));
+
+    if (matchingKey) {
+      const translation = TIMELINE_DESC_TRANSLATIONS[matchingKey];
+      const dynamicPart = description.slice(matchingKey.length);
+      return translation + dynamicPart;
+    }
+
+    return description;
+  };
 
   return (
     <div className="space-y-4">
@@ -293,7 +302,7 @@ export default function AdminShipments() {
           <table className="min-w-full text-sm">
             <thead className="border-b border-slate-200">
               <tr className="text-left">
-                <th className="py-2 pr-4 w-8"></th>{/* [NEW] 펼침 토글 칼럼 */}
+                <th className="py-2 pr-4 w-8"></th>
                 <th className="py-2 pr-4">운송장번호</th>
                 <th className="py-2 pr-4">상태</th>
                 <th className="py-2 pr-4">최근 이벤트</th>
@@ -317,13 +326,13 @@ export default function AdminShipments() {
                 <tr><td colSpan={6} className="py-6 text-center text-slate-500">데이터가 없습니다.</td></tr>
               ) : (
                 rows.map((r) => {
-          const isOpen = expanded.has(r.number);
-          const evtLoading = eventsLoading.has(r.number);
-          const events = eventsMap.get(r.number) || [];
-          const detLoading = detailsLoading.has(r.number);
-          const details = detailsMap.get(r.number) || {};
-          
-                  const translatedEventText = TIMELINE_DESC_TRANSLATIONS[r.last_event_text]?.trim() || r.last_event_text;
+                  const isOpen = expanded.has(r.number);
+                  const evtLoading = eventsLoading.has(r.number);
+                  const events = eventsMap.get(r.number) || [];
+                  const detLoading = detailsLoading.has(r.number);
+                  const details = detailsMap.get(r.number) || {};
+                  
+                  const translatedEventText = findTranslation(r.last_event_text);
 
                   return (
                     <React.Fragment key={r.number}>
@@ -344,66 +353,62 @@ export default function AdminShipments() {
                         <td className="py-2 pr-4 text-slate-500">{r.source || "-"}</td>
                       </tr>
 
-                      {/* [NEW] 펼친 영역 */}
-                       {isOpen && (
-                <tr>
-                  <td></td>
-                  <td colSpan={5} className="pb-3">
-                    <div className="grid gap-3">
-                      {/* 상세 카드 */}
-                      {detLoading ? (
-                        <div className="text-slate-500 inline-flex items-center gap-2">
-                          <LoaderIcon className="w-4 h-4 animate-spin" /> 상세 불러오는 중…
-                        </div>
-                      ) : (
-                        <DetailsCard
-                          number={r.number}
-                          details={details}
-                          onSaved={(patch) => {
-                            const m = new Map(detailsMap);
-                            m.set(r.number, { ...(details || {}), ...patch });
-                            setDetailsMap(m);
-                          }}
-                        />
-                      )}
-
-                      {/* 이벤트 타임라인 카드 (이전과 동일) */}
-                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-                        <div className="font-medium mb-2">이벤트 타임라인</div>
-                        {evtLoading ? (
-                          <div className="text-slate-500 inline-flex items-center gap-2">
-                            <LoaderIcon className="w-4 h-4 animate-spin" />
-                            불러오는 중…
-                          </div>
-                        ) : events.length === 0 ? (
-                          <div className="text-slate-500">이벤트가 없습니다.</div>
-                        ) : (
-                          <ul className="space-y-2">
-                            {events.map((e, idx) => {
-                              const s = (e.stage || "").toUpperCase();
-                              return (
-                                <li key={idx} className="flex items-start gap-2">
-                                  {s === "CLEARED" ? <CheckCircle className="w-4 h-4 mt-0.5" /> :
-                                   s === "DELAY"   ? <AlertTriangle className="w-4 h-4 mt-0.5" /> :
-                                                     <Clock className="w-4 h-4 mt-0.5" />}
-                                  <div className="grid grid-cols-[120px_1fr] gap-2">
-                                    <div className="text-slate-500">{formatDate(e.ts)}</div>
-                                    <div>
-                                      <span className="inline-block mr-2 align-middle"><StatusPill status={s} /></span>
-                                      <span className="align-middle">{e.desc || ""}</span>
-                                      {e.source && <span className="ml-2 text-xs text-slate-400">({e.source})</span>}
-                                    </div>
+                      {isOpen && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={5} className="pb-3">
+                            <div className="grid gap-3">
+                              {detLoading ? (
+                                <div className="text-slate-500 inline-flex items-center gap-2">
+                                  <LoaderIcon className="w-4 h-4 animate-spin" /> 상세 불러오는 중…
+                                </div>
+                              ) : (
+                                <DetailsCard
+                                  number={r.number}
+                                  details={details}
+                                  onSaved={(patch) => {
+                                    const m = new Map(detailsMap);
+                                    m.set(r.number, { ...(details || {}), ...patch });
+                                    setDetailsMap(m);
+                                  }}
+                                />
+                              )}
+                              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                                <div className="font-medium mb-2">이벤트 타임라인</div>
+                                {evtLoading ? (
+                                  <div className="text-slate-500 inline-flex items-center gap-2">
+                                    <LoaderIcon className="w-4 h-4 animate-spin" />
+                                    불러오는 중…
                                   </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                </tr>
-              )}
+                                ) : events.length === 0 ? (
+                                  <div className="text-slate-500">이벤트가 없습니다.</div>
+                                ) : (
+                                  <ul className="space-y-2">
+                                    {events.map((e, idx) => {
+                                      const s = (e.stage || "").toUpperCase();
+                                      return (
+                                        <li key={idx} className="flex items-start gap-2">
+                                          {s === "CLEARED" ? <CheckCircle className="w-4 h-4 mt-0.5" /> :
+                                           s === "DELAY"   ? <AlertTriangle className="w-4 h-4 mt-0.5" /> :
+                                                             <Clock className="w-4 h-4 mt-0.5" />}
+                                          <div className="grid grid-cols-[120px_1fr] gap-2">
+                                            <div className="text-slate-500">{formatDate(e.ts)}</div>
+                                            <div>
+                                              <span className="inline-block mr-2 align-middle"><StatusPill status={s} /></span>
+                                              <span className="align-middle">{findTranslation(e.desc)}</span>
+                                              {e.source && <span className="ml-2 text-xs text-slate-400">({e.source})</span>}
+                                            </div>
+                                          </div>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </React.Fragment>
                   );
                 })
