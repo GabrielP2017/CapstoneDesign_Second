@@ -66,3 +66,20 @@ FastAPI 앱에는 CORS가 활성화되어 있으며, 프론트엔드의 `Trackin
 ## 로컬 배포 가이드
 1. 백엔드(FastAPI)
    - 추가한 pip 라이브러리가 있다면 있다면 venv 활성화된 상태에서 `pip freeze > requirements.txt`
+
+## ML 분석 
+- 시뮬레이션 돌리실 때 필요한 라이브러리
+```
+pip install pandas numpy scipy scikit-learn lightgbm
+```
+
+## 현 시뮬레이션 문제점
+- DB의 진짜 배송 데이터로 미리 학습하고 유저 요청 시엔 예측만 빠르게 수행해야 하지만 현재는 테스트라서 매번 전체 과정을 반복
+- 가짜로 모델 학습 -> 고른 날짜를 기준으로 예측
+
+## 향후 계획
+- ShipmentEvent 테이블에 이미 저장 중인 통관/배송 이벤트 활용
+- 최소 3개월치 데이터 필요
+- 필요 정보: hub, carrier, origin, 입항시간, 통관완료시간, 배송완료시간
+- DB에서 데이터 추출 쿼리 작성
+- TestDataGenerator.generate_normal_data()를 DB 쿼리로 교체가 다음 해야할 일로 에상

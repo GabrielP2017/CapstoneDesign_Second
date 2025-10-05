@@ -8,6 +8,7 @@
 - 시간 역행/동시 타임스탬프 방어 + 중복 제거 + 누락 보정
 - 배치 등록/즉시 푸시/폴링 조회 + 재시도/지터/429-5xx 대처
 - 디버그/헬스/시뮬레이터 엔드포인트 추가
+- (Demo) ML 예측 API 통합 (Monitoring.py의 BE3Pipeline 사용)
 
 [주요 앵커]
   - [ANCHOR: HTTP_CLIENT]
@@ -27,7 +28,7 @@ from fastapi import Body
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dateutil import parser as dtp
 from typing import List, Dict, Any, Optional, Tuple
 import hmac, hashlib, json, re, os, asyncio, random
@@ -49,13 +50,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from contextlib import contextmanager
 from pydantic import BaseModel
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-
 from sqlalchemy import UniqueConstraint, ForeignKey
+import pandas as pd
+import numpy as np
 
-
-
-app = FastAPI(title="17TRACK Customs Filter – Enhanced")
+app = FastAPI(title="17TRACK Customs Filter Enhanced")
 
 FRONTEND_ORIGINS = [
     origin.strip()
@@ -84,12 +83,12 @@ class Shipment(Base):
     __tablename__ = "shipments"
     id = Column(Integer, primary_key=True, index=True)
     tracking_number = Column(String(128), unique=True, index=True, nullable=False)
-    carrier = Column(String(80), nullable=True)           # 선택적: carrier code/name
-    last_status = Column(String(80), nullable=True)       # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
-    last_event = Column(Text, nullable=True)              # 마지막 설명(짧게)
-    normalized = Column(Text, nullable=True)              # JSON 문자열로 저장(필요시 SAJSON 사용)
+    carrier = Column(String(80), nullable=True) # 선택적: carrier code/name
+    last_status = Column(String(80), nullable=True) # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
+    last_event = Column(Text, nullable=True) # 마지막 설명(짧게)
+    normalized = Column(Text, nullable=True) # JSON 문자열로 저장(필요시 SAJSON 사용)
     normalized_count = Column(Integer, default=0)
-    any_events = Column(Integer, default=0)               # boolean-like 0/1
+    any_events = Column(Integer, default=0) # boolean-like 0/1
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -98,19 +97,17 @@ class ShipmentEvent(Base):
     id = Column(Integer, primary_key=True)
     shipment_id = Column(Integer, ForeignKey("shipments.id", ondelete="CASCADE"), index=True, nullable=False)
     tracking_number = Column(String(128), index=True, nullable=False)
-    ts = Column(DateTime(timezone=True), index=True, nullable=False)  # 이벤트 시간 (UTC)
-    stage = Column(String(32), nullable=False)                       # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
-    desc = Column(Text, nullable=True)                                # 원문/번역 설명
-    source = Column(String(32), nullable=True)                        # 'webhook' | 'poll' | 'normalized'
+    ts = Column(DateTime(timezone=True), index=True, nullable=False) # 이벤트 시간 (UTC)
+    stage = Column(String(32), nullable=False) # CLEARED / IN_PROGRESS / DELAY / UNKNOWN
+    desc = Column(Text, nullable=True) # 원문/번역 설명
+    source = Column(String(32), nullable=True) # 'webhook' | 'poll' | 'normalized'
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("shipment_id", "ts", "stage", "desc", name="uq_shipment_event_dedup"),
     )
 
-
-
-# ======================= NEW: 통관/화물 상세 =======================
+# ======================= 통관/화물 상세 =======================
 class ShipmentDetails(Base):
     __tablename__ = "shipment_details"
     id = Column(Integer, primary_key=True)
@@ -118,27 +115,26 @@ class ShipmentDetails(Base):
     tracking_number = Column(String(128), index=True, nullable=False)
 
     # 표시 필드들
-    product_info = Column(Text)               # 물품 정보 (예: "HUMAN DOLLS OF TEXTILE MATERIALS 1 ...")
-    quantity = Column(Integer)                # 수량
-    weight_kg = Column(String(32))            # "0.1KG"처럼 단위 포함 문자열로 보관
-    clearance_status_text = Column(String(120))  # 통관진행상태 (예: "통관목록심사완료")
-    progress_status_text = Column(String(120))   # 진행상태 (예: "통관목록심사완료")
-    origin_country = Column(String(80))       # 적출국 (예: "중국")
-    loading_port = Column(String(120))        # 적재항 (예: "옌타이")
-    cargo_type = Column(String(80))           # 화물구분 (예: "수입 일반화물")
-    container_no = Column(String(80))         # 컨테이너번호
-    customs_office = Column(String(120))      # 세관명 (예: "인천공항세관")
-    arrival_port_name = Column(String(120))   # 입항명 (예: "서울/인천")
-    arrival_date = Column(DateTime(timezone=True))      # 입항일
-    tax_reference_date = Column(DateTime(timezone=True))# (합산과세 기준일)
-    event_processed_at = Column(DateTime(timezone=True))    # 처리일시(이벤트기준)
-    sync_processed_at = Column(DateTime(timezone=True))     # 처리일시(동기화기준)
-    forwarder_name = Column(String(160))      # 화물운송주선업자(포워더) 업체명
-    forwarder_phone = Column(String(64))      # 포워더 전화번호
+    product_info = Column(Text) # 물품 정보 (예: "HUMAN DOLLS OF TEXTILE MATERIALS 1 ...")
+    quantity = Column(Integer) # 수량
+    weight_kg = Column(String(32)) # "0.1KG"처럼 단위 포함 문자열로 보관
+    clearance_status_text = Column(String(120)) # 통관진행상태 (예: "통관목록심사완료")
+    progress_status_text = Column(String(120)) # 진행상태 (예: "통관목록심사완료")
+    origin_country = Column(String(80)) # 적출국 (예: "중국")
+    loading_port = Column(String(120)) # 적재항 (예: "옌타이")
+    cargo_type = Column(String(80)) # 화물구분 (예: "수입 일반화물")
+    container_no = Column(String(80)) # 컨테이너번호
+    customs_office = Column(String(120)) # 세관명 (예: "인천공항세관")
+    arrival_port_name = Column(String(120)) # 입항명 (예: "서울/인천")
+    arrival_date = Column(DateTime(timezone=True)) # 입항일
+    tax_reference_date = Column(DateTime(timezone=True)) # (합산과세 기준일)
+    event_processed_at = Column(DateTime(timezone=True)) # 처리일시(이벤트기준)
+    sync_processed_at = Column(DateTime(timezone=True)) # 처리일시(동기화기준)
+    forwarder_name = Column(String(160)) # 화물운송주선업자(포워더) 업체명
+    forwarder_phone = Column(String(64)) # 포워더 전화번호
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-# ======================= /NEW =======================
 
 class EventOut(BaseModel):
     ts: str
@@ -146,7 +142,7 @@ class EventOut(BaseModel):
     desc: str | None = None
     source: str | None = None
 
-# 테이블 생성 (기존 코드와 함께 둡니다)
+# 테이블 생성 
 Base.metadata.create_all(bind=engine)
 
 @contextmanager
@@ -160,8 +156,6 @@ def get_db():
         raise
     finally:
         db.close()
-
-
 
 @app.on_event("startup")
 async def _startup():
@@ -183,7 +177,7 @@ async def _shutdown():
 load_dotenv()
 # [ANCHOR: CONFIG] 환경 설정 (v1 기본, v2.x도 허용)
 API_BASE = os.getenv("SEVENTEENTRACK_API_BASE", "https://api.17track.net/track/v1")
-API_KEY  = os.getenv("SEVENTEENTRACK_API_KEY")  # 대시보드의 Tracking API Key
+API_KEY  = os.getenv("SEVENTEENTRACK_API_KEY") # 대시보드의 Tracking API Key
 USER_AGENT = os.getenv("SEVENTEENTRACK_UA", "customs-filter-demo/1.0")
 
 if not API_KEY:
@@ -202,7 +196,6 @@ class WebhookBody(BaseModel):
 
 def _sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
-
 
 def verify_17track_signature(raw_body: bytes, headers: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
     """17TRACK 서명 검증.
@@ -327,7 +320,7 @@ def _count_raw_events(track: Dict[str, Any]) -> int:
     return total
 
 def _parse_multi_time(ev: Dict[str, Any]) -> Optional[datetime]:
-    # ✅ UTC가 있으면 그것을 최우선으로 사용
+    # UTC가 있으면 그것을 최우선으로 사용
     s = ev.get("time_utc") or ev.get("time_iso")
     if not s:
         tr = ev.get("time_raw") or {}
@@ -635,10 +628,10 @@ class ShipmentDetailsIn(BaseModel):
     container_no: Optional[str] = None
     customs_office: Optional[str] = None
     arrival_port_name: Optional[str] = None
-    arrival_date: Optional[str] = None           # ISO 또는 "YYYY-MM-DD"
-    tax_reference_date: Optional[str] = None     # ISO 또는 "YYYY-MM-DD"
-    event_processed_at: Optional[str] = None     # ISO
-    sync_processed_at: Optional[str] = None      # ISO
+    arrival_date: Optional[str] = None # ISO 또는 "YYYY-MM-DD"
+    tax_reference_date: Optional[str] = None # ISO 또는 "YYYY-MM-DD"
+    event_processed_at: Optional[str] = None # ISO
+    sync_processed_at: Optional[str] = None # ISO
     forwarder_name: Optional[str] = None
     forwarder_phone: Optional[str] = None
 
@@ -719,7 +712,7 @@ def _extract_details_best_effort_from_track(
     ti = _ti_view(track or {})
 
     # [ANCHOR:ORIGIN_V1_BCODE] v1 track.b(정수 국가코드) → ISO2 → 한글
-    # 참고: v1 문서의 country code 표는 https://res.17track.net/asset/carrier/info/country.all.json (권고) :contentReference[oaicite:4]{index=4}
+    # 참고: v1 문서의 country code 표는 https://res.17track.net/asset/carrier/info/country.all.json (권고)
     # 최소 커버(즉시효과): 중국(301) 등 빈출만 내장, 나머지는 미해당 시 패스
     V1_COUNTRY_INT_TO_ISO2 = {
         301: "CN",   # China
@@ -1251,7 +1244,7 @@ def _upsert_events_for_shipment(
             "tracking_number": shipment_obj.tracking_number,
             "ts": ts_dt,
             "stage": stage,
-            "desc": desc,        # 컬럼명은 desc (SQLAlchemy가 적절히 quoting)
+            "desc": desc, # 컬럼명은 desc (SQLAlchemy가 적절히 quoting)
             "source": source,
         })
 
@@ -1332,7 +1325,7 @@ def upsert_shipment(db, tracking_number: str, summary: Dict[str, Any], normalize
         obj.updated_at = now
         db.add(obj)
 
-   # --- 자동 상세 채움(가능한 범위) ---
+        # --- 자동 상세 채움(가능한 범위) ---
         # 상태 텍스트는 내부 요약 → 한국식 표현으로 보조 매핑
         auto_patch = {
             "clearance_status_text": _kcs_status_text(incoming_status),
@@ -1638,6 +1631,125 @@ def admin_put_shipment_details(number: str, body: ShipmentDetailsIn):
         return {"ok": True, "tracking_number": number, "updated_at": _iso(row.updated_at) if row else None}
 
 
+# =============== 예측 API ===============
+# [ANCHOR: PREDICTION_API]
+
+class DeliveryPredictionRequest(BaseModel):
+    tracking_number: str
+    departure_date: str # ISO format
+    hub: str = "ICN"
+    carrier: str = "Unknown"
+    origin: str = "Unknown"
+
+class DeliveryPredictionResponse(BaseModel):
+    tracking_number: str
+    hub: str
+    carrier: str
+    origin: str
+    departure_date: str
+    predicted_clearance_median_h: float
+    predicted_clearance_p90_h: float
+    predicted_delivery_median_h: float
+    predicted_delivery_p90_h: float
+    total_predicted_median_h: float
+    total_predicted_p90_h: float
+    predicted_clearance_ts: str
+    predicted_eta_ts: str # P50
+    predicted_eta_p90_ts: str # P90
+    probability_distribution: list # 5일 확률 분포
+
+@app.post("/api/predict-delivery", response_model=DeliveryPredictionResponse)
+async def predict_delivery(req: DeliveryPredictionRequest):
+    """
+    특정 화물의 예상 도착 시간을 계산
+    Monitoring.py의 BE3Pipeline을 사용하여 실시간 예측을 수행
+    """
+    try:
+        # Monitoring.py 임포트
+        import sys
+        sys.path.append('.')
+        from Monitoring import BE3Pipeline, TestDataGenerator
+        
+        # 1) 학습용 히스토리 데이터 생성
+        historical_data = TestDataGenerator.generate_normal_data(
+            n_days=28,
+            shipments_per_day=30,
+            hub=req.hub,
+            carrier=req.carrier,
+            origin=req.origin,
+            seed=42
+        )
+        
+        # 2) 파이프라인 초기화 및 학습
+        pipeline = BE3Pipeline()
+        current_time = pd.Timestamp.now(tz='Asia/Seoul')
+        _ = pipeline.process(historical_data, current_time)
+        
+        # 3) 새 화물 데이터 준비
+        # tz-aware인지 확인 후 처리
+        departure_ts = pd.to_datetime(req.departure_date)
+        if departure_ts.tzinfo is None:
+            departure_ts = departure_ts.tz_localize('Asia/Seoul')
+        else:
+            departure_ts = departure_ts.tz_convert('Asia/Seoul')
+        
+        new_shipment = pd.DataFrame([{
+            'shipment_id': req.tracking_number,
+            'hub': req.hub,
+            'carrier': req.carrier,
+            'origin': req.origin,
+            'destination_city': 'Seoul',
+            'arrival_ts': departure_ts
+        }])
+        
+        # 4) 예측 수행
+        prediction = pipeline.predict_end_to_end(new_shipment)
+        result = prediction.iloc[0]
+        
+        # 5) 확률 분포 계산
+        median_eta = pd.to_datetime(result['predicted_eta_ts'])
+        probability_dist = []
+        
+        for offset in range(-2, 3):
+            date = median_eta + timedelta(days=offset)
+            probability = max(0, 1.0 - abs(offset) * 0.25)
+            probability_dist.append({
+                'date': date.isoformat(),
+                'probability': probability
+            })
+        
+        total_prob = sum(p['probability'] for p in probability_dist)
+        for p in probability_dist:
+            p['probability'] /= total_prob
+        
+        return DeliveryPredictionResponse(
+            tracking_number=req.tracking_number,
+            hub=req.hub,
+            carrier=req.carrier,
+            origin=req.origin,
+            departure_date=req.departure_date,
+            predicted_clearance_median_h=float(result['predicted_clearance_median_h']),
+            predicted_clearance_p90_h=float(result['predicted_clearance_p90_h']),
+            predicted_delivery_median_h=float(result['predicted_delivery_median_h']),
+            predicted_delivery_p90_h=float(result['predicted_delivery_p90_h']),
+            total_predicted_median_h=float(result['total_predicted_median_h']),
+            total_predicted_p90_h=float(result['total_predicted_p90_h']),
+            predicted_clearance_ts=result['predicted_clearance_ts'].isoformat(),
+            predicted_eta_ts=result['predicted_eta_ts'].isoformat(),
+            predicted_eta_p90_ts=result['predicted_eta_p90_ts'].isoformat(),
+            probability_distribution=probability_dist
+        )
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"\n{'='*60}")
+        print(f"예측 API 에러 발생:")
+        print(f"{'='*60}")
+        print(error_detail)
+        print(f"{'='*60}\n")
+        raise HTTPException(status_code=500, detail=f"예측 중 오류: {str(e)}")
+
 # =========================
 # 데모 실행(옵션)
 # =========================
@@ -1645,7 +1757,7 @@ async def main():
     tracking_numbers = ["TRACKING_NUMBER_1", "INVALID_NUMBER_2", "TRACKING_NUMBER_3"]
     print("\ud83d\ude80 register_trackings:", await register_trackings(tracking_numbers))
     print("\u26a1 push_now:", await push_now(tracking_numbers[:2]))
-    print("\\ud83d\\udd0e get_trackinfo:", await get_trackinfo(tracking_numbers[:2]))
+    print("🔎 get_trackinfo:", await get_trackinfo(tracking_numbers[:2]))
 
 if __name__ == "__main__":
     asyncio.run(main())

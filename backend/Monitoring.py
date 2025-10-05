@@ -1,4 +1,4 @@
-# 시뮬레이션 코드 (아직 연동 없음)
+# BE3 통관 모니터링/예측 파이프라인
 
 import numpy as np
 import pandas as pd
@@ -661,7 +661,7 @@ class TestDataGenerator:
 
 # 종합 테스트
 def run_comprehensive_test():
-    print("BE3 종합 테스트 및 예측 시스템")
+    print("종합 테스트 및 예측 시스템")
     
     # 1. 시나리오 기반 데이터 생성
     print("\n1. 테스트 데이터 생성")
