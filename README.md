@@ -85,3 +85,16 @@ pip install pandas numpy scipy scikit-learn lightgbm
 - 필요 정보: hub, carrier, origin, 입항시간, 통관완료시간, 배송완료시간
 - DB에서 데이터 추출 쿼리 작성
 - TestDataGenerator.generate_normal_data()를 DB 쿼리로 교체가 다음 해야할 일로 에상
+- DB 스키마 수정 (Shipment 클래스)
+
+마이그레이션 스크립트
+
+데이터 추출 함수 강화
+
+DB에서 학습 데이터 가져오기
+
+데이터 축적 시작
+프론트엔드에서 운송장을 조회하면:
+처음엔 DB 데이터 부족(< 100개)이므로 가짜 데이터로 학습
+조회할 때마다 hub, origin_code 등이 자동 저장됨
+100개 이상 쌓이면 자동으로 실제 DB 데이터로 학습 시작
