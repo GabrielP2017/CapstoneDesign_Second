@@ -79,6 +79,8 @@ pip install pandas numpy scipy scikit-learn lightgbm
 
 ## 향후 계획
 - ShipmentEvent 테이블에 이미 저장 중인 통관/배송 이벤트 활용
+- Be4 작성
+- API 연동
 - 최소 3개월치 데이터 필요
 - 필요 정보: hub, carrier, origin, 입항시간, 통관완료시간, 배송완료시간
 - DB에서 데이터 추출 쿼리 작성
