@@ -6,10 +6,17 @@ import Overview from "./components/DashBoard/Overview";
 import Reports from "./components/DashBoard/Reports";
 import Insights from "./components/DashBoard/CustomsPredictor";
 import AdminShipments from "./components/Admin/AdminShipments";
+import MainPage from "./components/MainPage/MainPage";
+import CustomsMain from "./pages/Customs/CustomsMain";
+import StatisticsMain from "./pages/Statistics/StatisticsMain";
+import NotificationsMain from "./pages/Notifications/NotificationsMain";
+import InquiriesMain from "./pages/Inquiries/InquiriesMain";
+import SettingsMain from "./pages/Settings/SettingsMain";
+import HelpMain from "./pages/Help/HelpMain";
 
 function App() {
   const [sideBarCollapsed, setSideBarCollapsed] = useState(true);
-  const [currentPage, setCurrentPage] = useState("dashboard");
+  const [currentPage, setCurrentPage] = useState("mainpage");
 
   return (
     <div
@@ -17,8 +24,11 @@ function App() {
       dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 transition-all duration-500"
     >
       <div className="flex flex-col h-screen">
-        <Header />
-        
+        <Header
+          currentPage={currentPage}
+          onToggleSidebar={() => setSideBarCollapsed(!sideBarCollapsed)}
+        />
+
         <div className="flex flex-1 overflow-hidden">
           <Sidebar
             collapsed={sideBarCollapsed}
@@ -26,16 +36,26 @@ function App() {
             onPageChange={setCurrentPage}
             onToggle={() => setSideBarCollapsed(!sideBarCollapsed)}
           />
-          
+
           {/* ▼▼▼ [수정된 부분] z-index를 추가하여 레이어 순서 조정 ▼▼▼ */}
           <main className="flex-1 overflow-y-auto bg-transparent relative z-20">
             <div className="p-6">
               {/* 페이지 콘텐츠 */}
+              {currentPage === "mainpage" && <MainPage />}
+              {currentPage === "customs" && <CustomsMain />}
+              {currentPage === "statistics" && <StatisticsMain />}
+              {currentPage === "notifications" && <NotificationsMain />}
+              {currentPage === "inquiries" && <InquiriesMain />}
+              {currentPage === "settings" && <SettingsMain />}
+              {currentPage === "help" && <HelpMain />}
+
+              {/* 기존 페이지들 (나중에 제거 예정) */}
               {currentPage === "dashboard" && <Dashboard />}
               {currentPage === "overview" && <Overview />}
-              {currentPage === "reports" && <Reports />}
-              {currentPage === "insights" && <Insights />}
               {currentPage === "admin.shipments" && <AdminShipments />}
+              {currentPage === "myitems" && <TrackingStatus />}
+              {currentPage === "customs-predictor" && <CustomsPredictor />}
+              {currentPage === "reports" && <Reports />}
             </div>
           </main>
           {/* ▲▲▲ [수정된 부분] 여기까지 ▲▲▲ */}
@@ -46,4 +66,3 @@ function App() {
 }
 
 export default App;
-
