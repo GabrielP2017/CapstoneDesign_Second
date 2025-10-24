@@ -55,32 +55,41 @@ function Header({
         <Menu className="w-5 h-5" />
       </button>
 
+      {/* 서브페이지 아이콘+타이틀: 햄버거 버튼과 같은 기준에 정렬(헤더 전체의 수직 중앙) */}
+      {!isMainPage && (
+        <div className="absolute top-1/2 -translate-y-1/2 left-[clamp(72px,6.5vw,116px)] flex items-center gap-[clamp(4px,1vw,10px)]">
+          <img
+            src={TitleIcon}
+            alt="brand-icon"
+            className="w-[clamp(41px,5.8vw,58px)] h-[clamp(41px,5.8vw,58px)] object-contain"
+          />
+          <img
+            src={TitleFont}
+            alt="WhyRight"
+            className="h-[clamp(36px,5.6vw,67px)] object-contain"
+          />
+        </div>
+      )}
+
+      {/* 상단 행은 항상 가운데 정렬(검색창 고정 중앙). 좌측/우측 요소는 absolute 배치 */}
       <div className="flex items-center justify-center relative">
         {!isMainPage ? (
-          // 메인페이지가 아닐 때: 아이콘 + 검색창 (가운데 정렬)
-          <div className="flex items-center space-x-2">
-            <div className="w-14 h-14 flex items-center justify-center">
-              <img
-                src={TitleIcon}
-                alt="brand-icon"
-                className="w-10 h-10 object-contain"
-              />
-            </div>
-            <div className="w-[500px]">
-              <div className="relative">
-                <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="통관번호를 입력하세요"
-                  className="w-full pl-12 pr-12 py-3.5 text-lg bg-slate-100 dark:bg-slate-800 border 
+          /* 입력칸도 함께 스케일: 고정폭 대신 clamp로 자연스러운 축소 */
+          <div className="w-full max-w-[clamp(380px,56vw,640px)] px-[clamp(8px,2vw,0px)]">
+            <div className="relative">
+              <Search className="w-[clamp(16px,1.6vw,20px)] h-[clamp(16px,1.6vw,20px)] absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="통관번호를 입력하세요"
+                className="w-full pl-12 pr-12 py-[clamp(10px,1.2vw,14px)] text-[clamp(14px,1.15vw,18px)] bg-slate-100 dark:bg-slate-800 border 
                   border-transparent focus:border-blue-500 rounded-xl text-slate-800
                   dark:text-white placeholder-slate-500 focus:outline-none focus:ring-1
                   focus:ring-blue-500 transition-all"
-                />
-                <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
-                  <Filter className="w-4 h-4" />
-                </button>
-              </div>
+              />
+
+              <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+                <Filter className="w-4 h-4" />
+              </button>
             </div>
           </div>
         ) : (
