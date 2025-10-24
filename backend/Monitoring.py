@@ -514,9 +514,22 @@ class BE3Pipeline:
         return results
     
     def predict_end_to_end(self, df_new_shipments: pd.DataFrame) -> pd.DataFrame:
+        """
+        신규 화물에 대해 end-to-end 예측 수행
+        
+        Args:
+            df_new_shipments: 예측할 화물 데이터프레임
+            
+        Returns:
+            예측 결과가 포함된 데이터프레임
+            
+        Raises:
+            RuntimeError: 모델이 학습되지 않은 경우
+        """
         if not self.clearance_predictor.is_fitted or not self.delivery_predictor.is_fitted:
-            print("오류: 예측 모델이 학습되지 않았습니다. process()를 먼저 실행하세요.")
-            return df_new_shipments
+            error_msg = "예측 모델이 학습되지 않았습니다. process()를 먼저 실행하세요."
+            print(f"오류: {error_msg}")
+            raise RuntimeError(error_msg)
 
         df = df_new_shipments.copy()
         
@@ -529,16 +542,27 @@ class BE3Pipeline:
         # 3. 예측 결과 병합
         df = pd.concat([df.reset_index(drop=True), clearance_predictions, delivery_predictions], axis=1)
         
-        # 4. 최종 ETA 계산 (P50과 P90 모두 계산)
+        # 4. 최종 ETA 계산 (P50과 P90을 수학적으로 올바르게 계산)
         arrival_ts_series = pd.to_datetime(df['arrival_ts'])
         
-        # P50 (Median) 계산
+        # P50 (Median) 계산 - 중앙값은 더할 수 있음
         df['total_predicted_median_h'] = df['predicted_clearance_median_h'] + df['predicted_delivery_median_h']
         df['predicted_clearance_ts'] = arrival_ts_series + pd.to_timedelta(df['predicted_clearance_median_h'], unit='h')
         df['predicted_eta_ts'] = arrival_ts_series + pd.to_timedelta(df['total_predicted_median_h'], unit='h')
 
-        # P90 계산 (수정된 부분)
-        df['total_predicted_p90_h'] = df['predicted_clearance_p90_h'] + df['predicted_delivery_p90_h']
+        # P90 계산
+        # 정규분포 가정: P90 = μ + 1.28σ, 따라서 σ = (P90 - P50) / 1.28
+        # 독립 변수 합: σ_total = √(σ_A² + σ_B²)
+        
+        # 각 단계의 표준편차 추정
+        sigma_clearance = (df['predicted_clearance_p90_h'] - df['predicted_clearance_median_h']) / 1.28
+        sigma_delivery = (df['predicted_delivery_p90_h'] - df['predicted_delivery_median_h']) / 1.28
+        
+        # 합산된 표준편차 계산 (분산의 합의 제곱근)
+        sigma_total = np.sqrt(sigma_clearance**2 + sigma_delivery**2)
+        
+        # 전체 프로세스의 P90 계산
+        df['total_predicted_p90_h'] = df['total_predicted_median_h'] + 1.28 * sigma_total
         df['predicted_eta_p90_ts'] = arrival_ts_series + pd.to_timedelta(df['total_predicted_p90_h'], unit='h')
 
         return df

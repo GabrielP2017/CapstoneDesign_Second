@@ -1,15 +1,16 @@
-import {
+﻿import {
   Bell,
   Filter,
   Plus,
   Search,
   Sun,
   Moon,
-  Zap,
   Settings,
   Menu,
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
+import TitleIcon from "../../../img/TitleIcon.png";
+import TitleFont from "../../../img/TitleFont.png";
 
 function Header({
   currentPage,
@@ -57,9 +58,13 @@ function Header({
       <div className="flex items-center justify-center relative">
         {!isMainPage ? (
           // 메인페이지가 아닐 때: 아이콘 + 검색창 (가운데 정렬)
-          <div className="flex items-center space-x-4">
-            <div className="w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Zap className="w-8 h-8 text-white" />
+          <div className="flex items-center space-x-2">
+            <div className="w-14 h-14 flex items-center justify-center">
+              <img
+                src={TitleIcon}
+                alt="brand-icon"
+                className="w-10 h-10 object-contain"
+              />
             </div>
             <div className="w-[500px]">
               <div className="relative">
@@ -80,17 +85,20 @@ function Header({
           </div>
         ) : (
           // 메인페이지일 때: 타이틀만 (가운데 정렬)
-          <div className="flex items-center space-x-4">
-            <div className="w-13 h-13 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Zap className="w-8 h-8 text-white" />
+          <div className="flex items-center space-x-2">
+            <div className="w-14 h-14 flex items-center justify-center">
+              <img
+                src={TitleIcon}
+                alt="brand-icon"
+                className="w-13 h-13 object-contain"
+              />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-slate-800 dark:text-white">
-                WhyRight
-              </h1>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                통관 리스크 알리미
-              </p>
+              <img
+                src={TitleFont}
+                alt="WhyRight"
+                className="h-10 sm:h-12 md:h-14 lg:h-16 object-contain"
+              />
             </div>
           </div>
         )}

@@ -1670,22 +1670,27 @@ async def predict_delivery(req: DeliveryPredictionRequest):
         sys.path.append('.')
         from Monitoring import BE3Pipeline, TestDataGenerator
         
-        # 1) 학습용 히스토리 데이터 생성
+        # 1) 현재 시간 기준 설정
+        current_time = pd.Timestamp.now(tz='Asia/Seoul')
+        
+        # 2) 학습용 히스토리 데이터 생성 (최근 28일치)
+        # current_time에서 28일 전부터 데이터 생성하여 학습 데이터가 필터링되지 않도록 함
+        start_date = (current_time - timedelta(days=28)).strftime('%Y-%m-%d')
         historical_data = TestDataGenerator.generate_normal_data(
             n_days=28,
             shipments_per_day=30,
             hub=req.hub,
             carrier=req.carrier,
             origin=req.origin,
+            start_date=start_date,
             seed=42
         )
         
-        # 2) 파이프라인 초기화 및 학습
+        # 3) 파이프라인 초기화 및 학습
         pipeline = BE3Pipeline()
-        current_time = pd.Timestamp.now(tz='Asia/Seoul')
         _ = pipeline.process(historical_data, current_time)
         
-        # 3) 새 화물 데이터 준비
+        # 4) 새 화물 데이터 준비
         # tz-aware인지 확인 후 처리
         departure_ts = pd.to_datetime(req.departure_date)
         if departure_ts.tzinfo is None:
@@ -1702,25 +1707,81 @@ async def predict_delivery(req: DeliveryPredictionRequest):
             'arrival_ts': departure_ts
         }])
         
-        # 4) 예측 수행
+        # 5) 예측 수행
         prediction = pipeline.predict_end_to_end(new_shipment)
         result = prediction.iloc[0]
         
-        # 5) 확률 분포 계산
+        # 6) 모델 학습 여부 확인
+        if 'predicted_eta_ts' not in result or pd.isna(result.get('predicted_eta_ts')):
+            raise HTTPException(
+                status_code=503, # Service Unavailable
+                detail={
+                    "error": "model_not_trained",
+                    "message": "배송 예측 서비스를 사용할 수 없습니다",
+                    "reason": "학습 데이터가 부족합니다. 더 많은 배송 이력 데이터가 필요합니다.",
+                    "suggestion": "시스템에 충분한 배송 이력이 쌓인 후 다시 시도해주세요."
+                }
+            )
+        
+        # 7) 확률 분포 계산 (누적 분포 함수 기반)
         median_eta = pd.to_datetime(result['predicted_eta_ts'])
+        p90_eta = pd.to_datetime(result['predicted_eta_p90_ts'])
+        
+        # P50과 P90의 차이로 표준편차 추정
+        # 정규분포에서 P90 = μ + 1.28σ
+        diff_hours = (p90_eta - median_eta).total_seconds() / 3600
+        sigma_hours = diff_hours / 1.28 if diff_hours > 0 else 12  # 기본값 12시간
+        
+        # 정규분포 누적 분포 함수(CDF) 
+        def normal_cdf(x, mu=0, sigma=1):
+            """오차 함수 근사"""
+            z = (x - mu) / (sigma * np.sqrt(2))
+            
+            # 오차 함수(erf) Abramowitz and Stegun 근사 (오차 < 1.5e-7)
+            a1 =  0.254829592
+            a2 = -0.284496736
+            a3 =  1.421413741
+            a4 = -1.453152027
+            a5 =  1.061405429
+            p  =  0.3275911
+            
+            sign = 1 if z >= 0 else -1
+            z = abs(z)
+            
+            t = 1.0 / (1.0 + p * z)
+            y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * np.exp(-z * z)
+            erf = sign * y
+            
+            return 0.5 * (1.0 + erf)
+        
+        # 5일치 확률 분포 생성 (각 날짜에 도착할 확률)
         probability_dist = []
+        probabilities = []
         
         for offset in range(-2, 3):
-            date = median_eta + timedelta(days=offset)
-            probability = max(0, 1.0 - abs(offset) * 0.25)
+            # 해당 날짜의 시작과 끝 시간
+            date_start = (median_eta + timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+            date_end = (median_eta + timedelta(days=offset)).replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            # 중앙값 기준으로 시간 차이 계산 (시간 단위)
+            hours_start = (date_start - median_eta).total_seconds() / 3600
+            hours_end = (date_end - median_eta).total_seconds() / 3600
+            
+            # 해당 날짜 범위에 도착할 확률 = CDF(끝) - CDF(시작)
+            prob_start = normal_cdf(hours_start, mu=0, sigma=sigma_hours)
+            prob_end = normal_cdf(hours_end, mu=0, sigma=sigma_hours)
+            prob = prob_end - prob_start
+            
             probability_dist.append({
-                'date': date.isoformat(),
-                'probability': probability
+                'date': (median_eta + timedelta(days=offset)).date().isoformat(),
+                'probability': prob
             })
+            probabilities.append(prob)
         
-        total_prob = sum(p['probability'] for p in probability_dist)
-        for p in probability_dist:
-            p['probability'] /= total_prob
+        # 정규화 (합이 1이 되도록, 소수점 오차 보정)
+        total_prob = sum(probabilities)
+        for i, p in enumerate(probability_dist):
+            p['probability'] = probabilities[i] / total_prob
         
         return DeliveryPredictionResponse(
             tracking_number=req.tracking_number,
