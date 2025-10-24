@@ -11,7 +11,13 @@ import {
 } from "lucide-react";
 import React, { useState, useEffect } from "react";
 
-function Header({ currentPage, onToggleSidebar }) {
+function Header({
+  currentPage,
+  onToggleSidebar,
+  tabs = [],
+  activeTab,
+  onTabChange,
+}) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedMode = localStorage.getItem("darkMode");
     if (savedMode !== null) return savedMode === "true";
@@ -122,6 +128,30 @@ function Header({ currentPage, onToggleSidebar }) {
           </button>
         </div>
       </div>
+
+      {/* Sub-tabs row under the title/search */}
+      {!isMainPage && Array.isArray(tabs) && tabs.length > 0 && (
+        <div className="mt-4 flex justify-center">
+          <nav
+            className="flex space-x-6 overflow-x-auto"
+            aria-label="sub-navigation"
+          >
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => onTabChange && onTabChange(tab.id)}
+                className={`py-2 px-1 border-b-2 font-medium text-sm whitespace-nowrap transition-colors ${
+                  activeTab === tab.id
+                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : "border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+      )}
     </div>
   );
 }

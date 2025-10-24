@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 
-function HelpMain() {
-  const [activeTab, setActiveTab] = useState("faq");
+function HelpMain({ activeTab: controlledActiveTab, onTabChange, showInternalTabs = true }) {
+  const [internalActiveTab, setInternalActiveTab] = useState("faq");
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onTabChange ?? setInternalActiveTab;
 
   const tabs = [
     { id: "faq", label: "자주 묻는 질문" },
@@ -13,6 +15,7 @@ function HelpMain() {
     <div className="space-y-6">
       {/* 상단 탭 네비게이션 */}
       <div
+        style={{ display: showInternalTabs ? undefined : "none" }}
         className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl 
       border-b border-slate-200/50 dark:border-slate-700/50"
       >

@@ -1,8 +1,10 @@
 import React, { useState } from "react";
 import ActivityFeed from "../../components/DashBoard/ActivityFeed";
 
-function NotificationsMain() {
-  const [activeTab, setActiveTab] = useState("all");
+function NotificationsMain({ activeTab: controlledActiveTab, onTabChange, showInternalTabs = true }) {
+  const [internalActiveTab, setInternalActiveTab] = useState("all");
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onTabChange ?? setInternalActiveTab;
 
   const tabs = [
     { id: "all", label: "전체 알림" },
@@ -14,6 +16,7 @@ function NotificationsMain() {
     <div className="space-y-6">
       {/* 상단 탭 네비게이션 */}
       <div
+        style={{ display: showInternalTabs ? undefined : "none" }}
         className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl 
       border-b border-slate-200/50 dark:border-slate-700/50"
       >

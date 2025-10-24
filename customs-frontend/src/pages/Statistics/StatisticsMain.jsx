@@ -3,8 +3,10 @@ import Overview from "../../components/DashBoard/Overview";
 import Dashboard from "../../components/DashBoard/Dashboard";
 import Reports from "../../components/DashBoard/Reports";
 
-function StatisticsMain() {
-  const [activeTab, setActiveTab] = useState("overview");
+function StatisticsMain({ activeTab: controlledActiveTab, onTabChange, showInternalTabs = true }) {
+  const [internalActiveTab, setInternalActiveTab] = useState("overview");
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onTabChange ?? setInternalActiveTab;
 
   const tabs = [
     { id: "overview", label: "통관 현황", component: Overview },
@@ -19,6 +21,7 @@ function StatisticsMain() {
     <div className="space-y-6">
       {/* 상단 탭 네비게이션 */}
       <div
+        style={{ display: showInternalTabs ? undefined : "none" }}
         className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl 
       border-b border-slate-200/50 dark:border-slate-700/50"
       >

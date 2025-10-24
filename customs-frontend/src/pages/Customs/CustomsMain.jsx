@@ -3,8 +3,10 @@ import TrackingStatus from "../../components/DashBoard/TrackingStatus";
 import CustomsPredictor from "../../components/DashBoard/CustomsPredictor";
 import AdminShipments from "../../components/Admin/AdminShipments";
 
-function CustomsMain() {
-  const [activeTab, setActiveTab] = useState("tracking");
+function CustomsMain({ activeTab: controlledActiveTab, onTabChange, showInternalTabs = true }) {
+  const [internalActiveTab, setInternalActiveTab] = useState("tracking");
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onTabChange ?? setInternalActiveTab;
 
   const tabs = [
     { id: "tracking", label: "운송장 조회", component: TrackingStatus },
@@ -19,6 +21,7 @@ function CustomsMain() {
     <div className="space-y-6">
       {/* 상단 탭 네비게이션 */}
       <div
+        style={{ display: showInternalTabs ? undefined : "none" }}
         className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl 
       border-b border-slate-200/50 dark:border-slate-700/50"
       >
