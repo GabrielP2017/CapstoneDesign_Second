@@ -1,4 +1,4 @@
-import { Bell, Filter, Plus, Search, Sun, Moon, Zap, Settings } from 'lucide-react'
+import { Bell, Filter, Plus, Search, Sun, Moon, Settings } from 'lucide-react'
 import React, { useState, useEffect } from 'react'
 
 function Header() {
@@ -26,9 +26,14 @@ function Header() {
       <div className='flex items-center justify-between'>
         <div className='flex items-center space-x-4'>
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Zap className="w-6 h-6 text-white" />
+            <div className="w-14 h-14 rounded-full bg-center bg-no"
+							style={{
+								backgroundImage: `url('/src/logo/통관로고.png')`,
+								backgroundSize: '110%'
+							}}
+						>
             </div>
+
             <div>
               <h1 className="text-xl font-bold text-slate-800 dark:text-white">WhyRight</h1>
               <p className="text-xs text-slate-500 dark:text-slate-400">통관 리스크 알리미</p>
