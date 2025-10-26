@@ -138,6 +138,27 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                          border-r border-slate-200 dark:border-slate-700
                          shadow-2xl`}
         >
+          {/* 펼친 상태 유저 정보 카드 */}
+          {!collapsed && (
+            <div className="p-4 border-b border-slate-200/50 dark:border-slate-700/50">
+              <div className="flex items-center space-x-3 rounded-xl">
+                <img
+                  src="https://mblogthumb-phinf.pstatic.net/MjAyMDAyMTBfODAg/MDAxNTgxMzA0MTE penthouse3833.ACRLtB9v5NH-I2qjWrwiXLb7TeUiG442cJmcdzVum7cg.eTLpNg_n0rAS5sWOsofRrvBy0qZk_QcWSfUiIagTfd8g.JPEG.lattepain/1581304118739.jpg?type=w800"
+                  alt="user"
+                  className="w-10 h-10 rounded-full ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-blue-500"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
+                    User
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                    ???????????
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 3x3 카테고리 그리드 - 펼쳤을 때만 표시 */}
           {!collapsed && (
             <div className="p-4 pt-6 border-b border-slate-200/50 dark:border-slate-700/50">
@@ -169,27 +190,44 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
 
           {/* 접혔을 때 - 기존 스타일 메뉴 */}
           {collapsed && (
-            <div className="flex-1">
-              <nav className="p-4 space-y-2">
-                {categories.slice(0, 6).map((category) => {
-                  const Icon = category.icon;
-                  const isActive = currentPage === category.id;
-                  return (
-                    <button
-                      key={category.id}
-                      onClick={() => onPageChange(category.id)}
-                      className={`w-full flex items-center justify-center p-3 rounded-xl transition-colors duration-200
-                        ${
-                          isActive
-                            ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25"
-                            : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50"
-                        }`}
-                    >
-                      <Icon className="w-5 h-5" />
-                    </button>
-                  );
-                })}
-              </nav>
+            <div className="flex-1 flex flex-col">
+              <div className="p-4 border-b border-slate-200/60 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={onToggle}
+                  aria-label="toggle-sidebar"
+                  className="w-full flex items-center justify-center py-2.5 rounded-xl
+                  bg-slate-100/80 dark:bg-slate-800/70 text-slate-700 dark:text-slate-100
+                  hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1">
+                <nav className="p-4 space-y-2">
+                  {categories.slice(0, 6).map((category) => {
+                    const Icon = category.icon;
+                    const isActive = currentPage === category.id;
+                    return (
+                      <button
+                        key={category.id}
+                        onClick={() => onPageChange(category.id)}
+                        className={`relative w-full flex items-center justify-center p-3 rounded-xl transition-colors duration-200 group
+                          ${
+                            isActive
+                              ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25"
+                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50"
+                          }`}
+                      >
+                        <Icon className="w-5 h-5" />
+                        <span className="pointer-events-none absolute left-full ml-3 px-4 py-1.5 rounded-xl text-sm font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-100 shadow-lg border border-slate-200/60 dark:border-slate-700/60 whitespace-nowrap opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200">
+                          {category.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
             </div>
           )}
 
@@ -405,30 +443,6 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                 );
               })}
             </nav>
-          </div>
-
-          <div className="p-4 border-t border-slate-200/50 dark:border-slate-700/50">
-            <div
-              className={`transition-opacity duration-200 ${
-                collapsed ? "opacity-0" : "opacity-100"
-              }`}
-            >
-              <div className="flex items-center space-x-3 rounded-xl mt-2">
-                <img
-                  src="https://mblogthumb-phinf.pstatic.net/MjAyMDAyMTBfODAg/MDAxNTgxMzA0MTE penthouse3833.ACRLtB9v5NH-I2qjWrwiXLb7TeUiG442cJmcdzVum7cg.eTLpNg_n0rAS5sWOsofRrvBy0qZk_QcWSfUiIagTfd8g.JPEG.lattepain/1581304118739.jpg?type=w800"
-                  alt="user"
-                  className="w-10 h-10 rounded-full ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-blue-500"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-800 dark:text-white truncate">
-                    차민욱
-                  </p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    프론트엔드 총관리자 및 웹 디자이너
-                  </p>
-                </div>
-              </div>
-            </div>
           </div>
 
           {activePopupItem && (

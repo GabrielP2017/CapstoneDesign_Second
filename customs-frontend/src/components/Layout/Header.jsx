@@ -1,11 +1,10 @@
-﻿import { Bell, Plus, Search, Sun, Moon, Settings, Menu } from "lucide-react";
+﻿import { Bell, Plus, Search, Sun, Moon, Settings } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import TitleIcon from "../../../img/TitleIcon.png";
 import TitleFont from "../../../img/TitleFont.png";
 
 function Header({
   currentPage,
-  onToggleSidebar,
   tabs = [],
   activeTab,
   onTabChange,
@@ -43,20 +42,10 @@ function Header({
     border-slate-200/50 dark:border-slate-700/50 px-5 py-4 relative z-30"
     >
       {/* 왼쪽 상단 사이드바 토글 버튼 */}
-      <button
-        onClick={onToggleSidebar}
-        aria-label="toggle-sidebar"
-        className="absolute left-5 top-1/2 -translate-y-1/2 p-2.5 rounded-xl 
-        text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 
-        transition-colors z-40"
-      >
-        <Menu className="w-5 h-5" />
-      </button>
-
       {/* 서브페이지 아이콘+타이틀: 햄버거 버튼과 같은 기준에 정렬(헤더 전체의 수직 중앙) */}
       {!isMainPage && (
         <div
-          className="absolute top-1/2 -translate-y-1/2 left-[clamp(72px,6.5vw,116px)] flex items-center gap-[clamp(4px,1vw,10px)] cursor-pointer select-none z-30"
+          className="absolute top-1/2 -translate-y-1/2 left-[clamp(8px,2vw,32px)] flex items-center gap-[clamp(4px,1vw,10px)] cursor-pointer select-none z-30"
           aria-label="go-home"
           onClick={handleLogoClick}
         >

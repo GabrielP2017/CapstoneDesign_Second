@@ -14,6 +14,14 @@ import NotificationsMain from "./pages/Notifications/NotificationsMain";
 import InquiriesMain from "./pages/Inquiries/InquiriesMain";
 import SettingsMain from "./pages/Settings/SettingsMain";
 import HelpMain from "./pages/Help/HelpMain";
+import LightBg1 from "../img/Light1.jpg";
+import LightBg2 from "../img/Light2.jpg";
+import DarkBg1 from "../img/Dark1.jpg";
+import DarkBg2 from "../img/Dark2.jpg";
+
+const LIGHT_BACKGROUNDS = [LightBg1, LightBg2];
+const DARK_BACKGROUNDS = [DarkBg1, DarkBg2];
+const BG_ROTATION_MS = 4000;
 
 function App() {
   const [sideBarCollapsed, setSideBarCollapsed] = useState(true);
@@ -21,6 +29,12 @@ function App() {
   const [activeTab, setActiveTab] = useState(null);
   const [trackIntent, setTrackIntent] = useState({});
   const [trackTriggerId, setTrackTriggerId] = useState(0);
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    typeof document !== "undefined"
+      ? document.documentElement.classList.contains("dark")
+      : false
+  );
+  const [bgIndex, setBgIndex] = useState(0);
 
   // Define sub-tab sets per category page
   const TAB_CONFIG = {
@@ -93,31 +107,69 @@ function App() {
     setTrackTriggerId((x) => x + 1);
   };
 
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (currentPage !== "mainpage") {
+      return;
+    }
+    setBgIndex(0);
+    const id = setInterval(() => {
+      const targetSet = isDarkMode ? DARK_BACKGROUNDS : LIGHT_BACKGROUNDS;
+      setBgIndex((prev) => (prev + 1) % targetSet.length);
+    }, BG_ROTATION_MS);
+    return () => clearInterval(id);
+  }, [currentPage, isDarkMode]);
+
+  const activeBackgrounds = isDarkMode ? DARK_BACKGROUNDS : LIGHT_BACKGROUNDS;
+  const showMainPageBackground = currentPage === "mainpage";
+
   return (
-    <div
-      className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 
-      dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 transition-all duration-500"
-    >
-      <div className="flex flex-col h-screen">
-        <Header
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 transition-all duration-500 overflow-hidden">
+      {showMainPageBackground && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-[820px] z-0 overflow-hidden">
+          {activeBackgrounds.map((bg, idx) => (
+            <div
+              key={`${bg}-${idx}`}
+              className={`absolute inset-0 bg-cover bg-center transition-opacity duration-1000 ${
+                idx === bgIndex ? "opacity-100" : "opacity-0"
+              }`}
+              style={{ backgroundImage: `url(${bg})` }}
+            />
+          ))}
+          <div className="absolute inset-0 bg-white/70 dark:bg-slate-950/65 backdrop-blur-[2px]" />
+          <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-white/0 to-white dark:to-slate-950" />
+        </div>
+      )}
+
+      <div className="relative z-10 flex h-screen">
+        <Sidebar
+          collapsed={sideBarCollapsed}
           currentPage={currentPage}
-          onToggleSidebar={() => setSideBarCollapsed(!sideBarCollapsed)}
-          tabs={currentTabs}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          onSearch={goSearch}
-          onGoHome={() => {
-            setCurrentPage("mainpage");
-            setActiveTab(null);
-          }}
+          onPageChange={setCurrentPage}
+          onToggle={() => setSideBarCollapsed(!sideBarCollapsed)}
         />
 
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar
-            collapsed={sideBarCollapsed}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <Header
             currentPage={currentPage}
-            onPageChange={setCurrentPage}
-            onToggle={() => setSideBarCollapsed(!sideBarCollapsed)}
+            tabs={currentTabs}
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onSearch={goSearch}
+            onGoHome={() => {
+              setCurrentPage("mainpage");
+              setActiveTab(null);
+            }}
           />
 
           {/* ▼▼▼ [수정된 부분] z-index를 추가하여 레이어 순서 조정 ▼▼▼ */}
