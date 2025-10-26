@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import PIcon from "../../../img/p.png";
 import {
   BarChart3,
   Calendar,
@@ -135,15 +136,15 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
         <div
           className={`relative z-50 w-full h-full flex flex-col
                          bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl
-                         border-r border-slate-200 dark:border-slate-700
+                         border-r border-slate-200/70 dark:border-slate-700
                          shadow-2xl`}
         >
           {/* 펼친 상태 유저 정보 카드 */}
           {!collapsed && (
-            <div className="p-4 border-b border-slate-200/50 dark:border-slate-700/50">
+            <div className="p-4 border-b border-slate-300/70 dark:border-slate-700/50">
               <div className="flex items-center space-x-3 rounded-xl">
                 <img
-                  src="https://mblogthumb-phinf.pstatic.net/MjAyMDAyMTBfODAg/MDAxNTgxMzA0MTE penthouse3833.ACRLtB9v5NH-I2qjWrwiXLb7TeUiG442cJmcdzVum7cg.eTLpNg_n0rAS5sWOsofRrvBy0qZk_QcWSfUiIagTfd8g.JPEG.lattepain/1581304118739.jpg?type=w800"
+                  src={PIcon}
                   alt="user"
                   className="w-10 h-10 rounded-full ring-2 ring-offset-2 ring-offset-white dark:ring-offset-slate-900 ring-blue-500"
                 />
@@ -152,7 +153,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                     User
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                    ???????????
+                    WhyRight
                   </p>
                 </div>
               </div>
@@ -161,7 +162,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
 
           {/* 3x3 카테고리 그리드 - 펼쳤을 때만 표시 */}
           {!collapsed && (
-            <div className="p-4 pt-6 border-b border-slate-200/50 dark:border-slate-700/50">
+            <div className="p-4 pt-6 border-b border-slate-300/70 dark:border-slate-700/50">
               <div className="grid grid-cols-3 gap-2">
                 {categories.map((category) => {
                   const Icon = category.icon;
@@ -170,8 +171,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                       key={category.id}
                       onClick={() => onPageChange(category.id)}
                       className={`aspect-square rounded-lg flex flex-col items-center justify-center
-                      bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700
-                      transition-all p-3 ${
+                      hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-all p-3 ${
                         currentPage === category.id
                           ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
                           : "text-slate-600 dark:text-slate-400"
@@ -191,7 +191,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
           {/* 접혔을 때 - 기존 스타일 메뉴 */}
           {collapsed && (
             <div className="flex-1 flex flex-col">
-              <div className="p-4 border-b border-slate-200/60 dark:border-slate-700/60">
+              <div className="p-4 border-b border-slate-300/70 dark:border-slate-700/60">
                 <button
                   type="button"
                   onClick={onToggle}
@@ -220,7 +220,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                           }`}
                       >
                         <Icon className="w-5 h-5" />
-                        <span className="pointer-events-none absolute left-full ml-3 px-4 py-1.5 rounded-xl text-sm font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-100 shadow-lg border border-slate-200/60 dark:border-slate-700/60 whitespace-nowrap opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200">
+                        <span className="pointer-events-none absolute left-full ml-3 px-4 py-1.5 rounded-xl text-sm font-semibold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-100 shadow-lg border border-slate-300/70 dark:border-slate-700/60 whitespace-nowrap opacity-0 translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200">
                           {category.name}
                         </span>
                       </button>
@@ -423,7 +423,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                           : "max-h-0"
                       }`}
                     >
-                      <div className="ml-4 mt-2 space-y-1 border-l-2 border-slate-200 dark:border-slate-700">
+                      <div className="ml-4 mt-2 space-y-1 border-l-2 border-slate-300 dark:border-slate-700">
                         {item.submenu?.map((subitem) => (
                           <button
                             key={subitem.id}
@@ -447,14 +447,14 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
 
           {activePopupItem && (
             <div
-              className="absolute left-full w-max bg-white dark:bg-slate-800 py-2 pr-2 pl-6 rounded-xl shadow-2xl border border-slate-200/50 dark:border-slate-700/50 z-50"
+              className="absolute left-full w-max bg-white dark:bg-slate-800 py-2 pr-2 pl-6 rounded-xl shadow-2xl border border-slate-300/70 dark:border-slate-700/50 z-50"
               style={{ top: `${openPopup.index * 52 + 16}px` }}
             >
               <p className="font-bold px-3 py-1 text-slate-800 dark:text-white">
                 {activePopupItem.label}
               </p>
               {activePopupItem.submenu && (
-                <div className="mt-1 pt-1 border-t border-slate-200 dark:border-slate-700">
+                <div className="mt-1 pt-1 border-t border-slate-300 dark:border-slate-700">
                   {activePopupItem.submenu.map((subitem) => (
                     <button
                       key={subitem.id}
