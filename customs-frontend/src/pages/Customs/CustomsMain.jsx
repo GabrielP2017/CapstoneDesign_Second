@@ -18,7 +18,7 @@ function CustomsMain({ activeTab: controlledActiveTab, onTabChange, showInternal
 
   return (
     <div className="space-y-6">
-      {/* Local sub-tabs (hidden when controlled from Header) */}
+      {/* 내부 서브탭 (헤더에서 제어 중일 때 숨김) */}
       <div
         style={{ display: showInternalTabs ? undefined : "none" }}
         className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50"
@@ -42,7 +42,7 @@ function CustomsMain({ activeTab: controlledActiveTab, onTabChange, showInternal
         </div>
       </div>
 
-      {/* Content */}
+      {/* 콘텐츠 영역 */}
       {activeTab === "tracking" ? (
         <ActiveComponent {...(trackingProps || {})} />
       ) : (

@@ -106,6 +106,10 @@ function App() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           onSearch={goSearch}
+          onGoHome={() => {
+            setCurrentPage("mainpage");
+            setActiveTab(null);
+          }}
         />
 
         <div className="flex flex-1 overflow-hidden">

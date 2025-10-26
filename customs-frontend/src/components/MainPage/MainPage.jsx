@@ -35,9 +35,9 @@ function MainPage({ onSearch, onSample, onIncomplete }) {
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center">
-      <div className="w-full max-w-2xl px-4">
-        <div className="text-center mb-12">
+    <div className="min-h-[75vh] flex items-start justify-center pt-32">
+      <div className="w-full max-w-2xl px-4 mt-10">
+        <div className="text-center mb-8">
           <h1 className="text-5xl font-bold text-slate-800 dark:text-white mb-4">통관 상태를 확인하세요</h1>
           <p className="text-lg text-slate-600 dark:text-slate-400">운송장 번호를 입력하면 실시간으로 통관 상태를 확인할 수 있어요.</p>
         </div>
@@ -73,4 +73,3 @@ function MainPage({ onSearch, onSample, onIncomplete }) {
 }
 
 export default MainPage;
-

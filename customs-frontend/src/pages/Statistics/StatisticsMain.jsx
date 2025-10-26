@@ -3,7 +3,11 @@ import Overview from "../../components/DashBoard/Overview";
 import Dashboard from "../../components/DashBoard/Dashboard";
 import Reports from "../../components/DashBoard/Reports";
 
-function StatisticsMain({ activeTab: controlledActiveTab, onTabChange, showInternalTabs = true }) {
+function StatisticsMain({
+  activeTab: controlledActiveTab,
+  onTabChange,
+  showInternalTabs = true,
+}) {
   const [internalActiveTab, setInternalActiveTab] = useState("overview");
   const activeTab = controlledActiveTab ?? internalActiveTab;
   const setActiveTab = onTabChange ?? setInternalActiveTab;
@@ -14,7 +18,8 @@ function StatisticsMain({ activeTab: controlledActiveTab, onTabChange, showInter
     { id: "reports", label: "보고서", component: Reports },
   ];
 
-  const ActiveComponent = tabs.find((tab) => tab.id === activeTab)?.component || Overview;
+  const ActiveComponent =
+    tabs.find((tab) => tab.id === activeTab)?.component || Overview;
 
   return (
     <div className="space-y-6">
@@ -41,11 +46,9 @@ function StatisticsMain({ activeTab: controlledActiveTab, onTabChange, showInter
         </div>
       </div>
 
-      {/* Content */}
       <ActiveComponent />
     </div>
   );
 }
 
 export default StatisticsMain;
-

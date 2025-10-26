@@ -1,13 +1,4 @@
-﻿import {
-  Bell,
-  Filter,
-  Plus,
-  Search,
-  Sun,
-  Moon,
-  Settings,
-  Menu,
-} from "lucide-react";
+﻿import { Bell, Plus, Search, Sun, Moon, Settings, Menu } from "lucide-react";
 import React, { useState, useEffect } from "react";
 import TitleIcon from "../../../img/TitleIcon.png";
 import TitleFont from "../../../img/TitleFont.png";
@@ -19,6 +10,7 @@ function Header({
   activeTab,
   onTabChange,
   onSearch,
+  onGoHome,
 }) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedMode = localStorage.getItem("darkMode");
@@ -39,6 +31,11 @@ function Header({
   const toggleDarkMode = () => setIsDarkMode((prevMode) => !prevMode);
 
   const isMainPage = currentPage === "mainpage";
+  const handleLogoClick = () => {
+    if (typeof onGoHome === "function") {
+      onGoHome();
+    }
+  };
 
   return (
     <div
@@ -58,7 +55,11 @@ function Header({
 
       {/* 서브페이지 아이콘+타이틀: 햄버거 버튼과 같은 기준에 정렬(헤더 전체의 수직 중앙) */}
       {!isMainPage && (
-        <div className="absolute top-1/2 -translate-y-1/2 left-[clamp(72px,6.5vw,116px)] flex items-center gap-[clamp(4px,1vw,10px)]">
+        <div
+          className="absolute top-1/2 -translate-y-1/2 left-[clamp(72px,6.5vw,116px)] flex items-center gap-[clamp(4px,1vw,10px)] cursor-pointer select-none z-30"
+          aria-label="go-home"
+          onClick={handleLogoClick}
+        >
           <img
             src={TitleIcon}
             alt="brand-icon"
@@ -73,7 +74,7 @@ function Header({
       )}
 
       {/* 상단 행은 항상 가운데 정렬(검색창 고정 중앙). 좌측/우측 요소는 absolute 배치 */}
-      <div className="flex items-center justify-center relative">
+      <div className="flex items-center justify-center relative z-10">
         {!isMainPage ? (
           /* 입력칸도 함께 스케일: 고정폭 대신 clamp로 자연스러운 축소 */
           <div className="w-full max-w-[clamp(380px,56vw,640px)] px-[clamp(8px,2vw,0px)]">
@@ -111,7 +112,7 @@ function Header({
                 }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
               >
-                <Filter className="w-4 h-4" />
+                <Search className="w-4 h-4" />
               </button>
             </div>
           </div>

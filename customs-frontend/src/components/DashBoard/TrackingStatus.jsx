@@ -178,7 +178,7 @@ export default function TrackingStatus({ initialNumber, autoLookup, autoSample, 
     return () => { ignore = true; };
   }, []);
 
-  // One-time auto actions triggered via props (navigation from MainPage)
+  // MainPage 등에서 전달된 의도를 한 번만 실행
   useEffect(() => {
     const run = async () => {
       if (autoSample) {
