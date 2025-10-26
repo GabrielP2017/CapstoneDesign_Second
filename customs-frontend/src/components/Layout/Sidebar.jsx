@@ -129,7 +129,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
     <div className="relative h-full" ref={sidebarRef}>
       <div
         className={`${
-          collapsed ? "w-20" : "w-80"
+          collapsed ? "w-18" : "w-80"
         } h-full transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]`}
       >
         <div
@@ -204,7 +204,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                 </button>
               </div>
               <div className="flex-1">
-                <nav className="p-4 space-y-2">
+                <nav className="p-4 space-y-4">
                   {categories.slice(0, 6).map((category) => {
                     const Icon = category.icon;
                     const isActive = currentPage === category.id;
@@ -212,7 +212,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
                       <button
                         key={category.id}
                         onClick={() => onPageChange(category.id)}
-                        className={`relative w-full flex items-center justify-center p-3 rounded-xl transition-colors duration-200 group
+                        className={`relative w-full flex items-center justify-center py-2.5 px-2.5 rounded-xl transition-colors duration-200 group
                           ${
                             isActive
                               ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25"
