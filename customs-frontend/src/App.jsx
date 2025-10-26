@@ -19,6 +19,8 @@ function App() {
   const [sideBarCollapsed, setSideBarCollapsed] = useState(true);
   const [currentPage, setCurrentPage] = useState("mainpage");
   const [activeTab, setActiveTab] = useState(null);
+  const [trackIntent, setTrackIntent] = useState({});
+  const [trackTriggerId, setTrackTriggerId] = useState(0);
 
   // Define sub-tab sets per category page
   const TAB_CONFIG = {
@@ -62,12 +64,34 @@ function App() {
   // Reset sub-tab when page changes
   useEffect(() => {
     if (currentTabs.length > 0) {
-      setActiveTab((prev) => (currentTabs.some((t) => t.id === prev) ? prev : currentTabs[0].id));
+      setActiveTab((prev) =>
+        currentTabs.some((t) => t.id === prev) ? prev : currentTabs[0].id
+      );
     } else {
       setActiveTab(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
+
+  // Handlers to navigate from MainPage to Customs > TrackingStatus
+  const goSearch = (number) => {
+    setCurrentPage("customs");
+    setActiveTab("tracking");
+    setTrackIntent({ initialNumber: number, autoLookup: true });
+    setTrackTriggerId((x) => x + 1);
+  };
+  const goSample = () => {
+    setCurrentPage("customs");
+    setActiveTab("tracking");
+    setTrackIntent({ autoSample: true });
+    setTrackTriggerId((x) => x + 1);
+  };
+  const goIncomplete = () => {
+    setCurrentPage("customs");
+    setActiveTab("tracking");
+    setTrackIntent({ autoIncomplete: true });
+    setTrackTriggerId((x) => x + 1);
+  };
 
   return (
     <div
@@ -81,6 +105,7 @@ function App() {
           tabs={currentTabs}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          onSearch={goSearch}
         />
 
         <div className="flex flex-1 overflow-hidden">
@@ -95,57 +120,70 @@ function App() {
           <main className="flex-1 overflow-y-auto bg-transparent relative z-20">
             <div className="p-6">
               {/* 페이지 콘텐츠 */}
-              {currentPage === "mainpage" && <MainPage />}
-              {currentPage === "customs" && (
-                <CustomsMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
+              {currentPage === "mainpage" ? (
+                <MainPage
+                  onSearch={goSearch}
+                  onSample={goSample}
+                  onIncomplete={goIncomplete}
                 />
-              )}
-              {currentPage === "statistics" && (
-                <StatisticsMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-              )}
-              {currentPage === "notifications" && (
-                <NotificationsMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-              )}
-              {currentPage === "inquiries" && (
-                <InquiriesMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-              )}
-              {currentPage === "settings" && (
-                <SettingsMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-              )}
-              {currentPage === "help" && (
-                <HelpMain
-                  showInternalTabs={false}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                />
-              )}
+              ) : (
+                <div className="mx-auto w-full lg:w-[75%] px-4">
+                  {currentPage === "customs" && (
+                    <CustomsMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                      trackingProps={{
+                        ...trackIntent,
+                        triggerId: trackTriggerId,
+                      }}
+                    />
+                  )}
+                  {currentPage === "statistics" && (
+                    <StatisticsMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  )}
+                  {currentPage === "notifications" && (
+                    <NotificationsMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  )}
+                  {currentPage === "inquiries" && (
+                    <InquiriesMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  )}
+                  {currentPage === "settings" && (
+                    <SettingsMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  )}
+                  {currentPage === "help" && (
+                    <HelpMain
+                      showInternalTabs={false}
+                      activeTab={activeTab}
+                      onTabChange={setActiveTab}
+                    />
+                  )}
 
-              {/* 기존 페이지들 (나중에 제거 예정) */}
-              {currentPage === "dashboard" && <Dashboard />}
-              {currentPage === "overview" && <Overview />}
-              {currentPage === "admin.shipments" && <AdminShipments />}
-              {currentPage === "myitems" && <TrackingStatus />}
-              {currentPage === "customs-predictor" && <CustomsPredictor />}
-              {currentPage === "reports" && <Reports />}
+                  {/* 기존 페이지들 (나중에 제거 예정) */}
+                  {currentPage === "dashboard" && <Dashboard />}
+                  {currentPage === "overview" && <Overview />}
+                  {currentPage === "admin.shipments" && <AdminShipments />}
+                  {currentPage === "myitems" && <TrackingStatus />}
+                  {currentPage === "customs-predictor" && <CustomsPredictor />}
+                  {currentPage === "reports" && <Reports />}
+                </div>
+              )}
             </div>
           </main>
           {/* ▲▲▲ [수정된 부분] 여기까지 ▲▲▲ */}

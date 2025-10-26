@@ -18,6 +18,7 @@ function Header({
   tabs = [],
   activeTab,
   onTabChange,
+  onSearch,
 }) {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedMode = localStorage.getItem("darkMode");
@@ -79,15 +80,37 @@ function Header({
             <div className="relative">
               <Search className="w-[clamp(16px,1.6vw,20px)] h-[clamp(16px,1.6vw,20px)] absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
+                name="header-tracking"
                 type="text"
-                placeholder="통관번호를 입력하세요"
+                placeholder="운송장 번호를 입력하세요"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const v = e.currentTarget.value.trim();
+                    if (v && onSearch) {
+                      onSearch(v);
+                    }
+                  }
+                }}
                 className="w-full pl-12 pr-12 py-[clamp(10px,1.2vw,14px)] text-[clamp(14px,1.15vw,18px)] bg-slate-100 dark:bg-slate-800 border 
                   border-transparent focus:border-blue-500 rounded-xl text-slate-800
                   dark:text-white placeholder-slate-500 focus:outline-none focus:ring-1
                   focus:ring-blue-500 transition-all"
               />
 
-              <button className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+              <button
+                type="button"
+                onClick={(e) => {
+                  const el = e.currentTarget
+                    .closest("div.relative")
+                    ?.querySelector('input[name="header-tracking"]');
+                  const v = el ? el.value.trim() : "";
+                  if (v && onSearch) {
+                    onSearch(v);
+                  }
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              >
                 <Filter className="w-4 h-4" />
               </button>
             </div>

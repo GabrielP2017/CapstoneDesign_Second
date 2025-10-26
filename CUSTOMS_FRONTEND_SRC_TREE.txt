@@ -1,0 +1,55 @@
+﻿Folder PATH listing
+Volume serial number is 00000067 844F:D9B8
+C:\USERS\ALVIN\ONEDRIVE\바탕 화면\WORKSPACE\CAPSTONEDESIGN_SECOND\CUSTOMS-FRONTEND\SRC
+│   App.jsx
+│   index.css
+│   main.jsx
+│   
+├───components
+│   ├───Admin
+│   │       AdminShipments.jsx
+│   │       
+│   ├───DashBoard
+│   │       ActivityFeed.jsx
+│   │       ChartSection.jsx
+│   │       CustomsPredictor.jsx
+│   │       Dashboard.jsx
+│   │       Overview.jsx
+│   │       PopularProducts.jsx
+│   │       Reports.jsx
+│   │       RevenueChart.jsx
+│   │       SalesChart.jsx
+│   │       StatsGrid.jsx
+│   │       TableSection.jsx
+│   │       TrackingStatus.jsx
+│   │       
+│   ├───Layout
+│   │       Header.jsx
+│   │       Sidebar.jsx
+│   │       
+│   └───MainPage
+│           MainPage.jsx
+│           
+├───lib
+│       api.js
+│       api.ts
+│       
+└───pages
+    ├───Customs
+    │       CustomsMain.jsx
+    │       
+    ├───Help
+    │       HelpMain.jsx
+    │       
+    ├───Inquiries
+    │       InquiriesMain.jsx
+    │       
+    ├───Notifications
+    │       NotificationsMain.jsx
+    │       
+    ├───Settings
+    │       SettingsMain.jsx
+    │       
+    └───Statistics
+            StatisticsMain.jsx
+            

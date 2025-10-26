@@ -157,7 +157,7 @@ const MOCK_DATA_DISTRIBUTION = {
 
 const RANDOMNESS_FACTOR = 0.2;
 
-export default function TrackingStatus() {
+export default function TrackingStatus({ initialNumber, autoLookup, autoSample, autoIncomplete, triggerId } = {}) {
  const [trackingNumber, setTrackingNumber] = useState('');
  const [summary, setSummary] = useState(null);
  const [events, setEvents] = useState([]);
@@ -170,13 +170,34 @@ export default function TrackingStatus() {
  const [selectedDate, setSelectedDate] = useState(new Date());
  const [prediction, setPrediction] = useState([]);
 
- useEffect(() => {
+  useEffect(() => {
     let ignore = false;
     getHealth()
       .then((res) => { if (!ignore) setHealth({ state: 'ok', detail: res }); })
       .catch((err) => { if (!ignore) setHealth({ state: 'error', detail: err.message || '서버 점검 필요' }); });
     return () => { ignore = true; };
   }, []);
+
+  // One-time auto actions triggered via props (navigation from MainPage)
+  useEffect(() => {
+    const run = async () => {
+      if (autoSample) {
+        await handleSample();
+        return;
+      }
+      if (autoIncomplete) {
+        handleIncompleteTest();
+        return;
+      }
+      if (initialNumber && autoLookup) {
+        setTrackingNumber(initialNumber);
+        await lookup(initialNumber);
+      }
+    };
+    if (triggerId !== undefined) {
+      run();
+    }
+  }, [triggerId]);
   
  const resetResult = () => {
     setTrackingNumber('');
