@@ -146,7 +146,7 @@ function App() {
               style={{ backgroundImage: `url(${bg})` }}
             />
           ))}
-          <div className="absolute inset-0 bg-white/10 dark:bg-slate-950/65 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 bg-white/40 dark:bg-slate-950/65 backdrop-blur-[2px]" />
           <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-white/0 to-white dark:to-slate-950" />
         </div>
       )}
