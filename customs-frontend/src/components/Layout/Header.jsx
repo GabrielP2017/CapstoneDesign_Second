@@ -1,5 +1,5 @@
 ﻿import { Bell, Plus, Search, Sun, Moon, Settings } from "lucide-react";
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import TitleIcon from "../../../img/TitleIcon.png";
 import TitleFont from "../../../img/TitleFont.png";
 
