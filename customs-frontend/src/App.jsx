@@ -157,6 +157,7 @@ function App() {
           currentPage={currentPage}
           onPageChange={setCurrentPage}
           onToggle={() => setSideBarCollapsed(!sideBarCollapsed)}
+          onSearchHistoryClick={goSearch}
         />
 
         <div className="flex flex-col flex-1 overflow-hidden">

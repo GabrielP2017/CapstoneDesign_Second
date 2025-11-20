@@ -19,7 +19,9 @@ import {
   Grid3X3,
   Layers,
   Zap,
+  X as XIcon,
 } from "lucide-react";
+import { getSearchHistory, removeSearchHistory, getStatusColorClass } from "../../lib/searchHistory";
 
 // 3x3 카테고리 정의
 const categories = [
@@ -97,10 +99,11 @@ menuItems.forEach((item) => {
   }
 });
 
-function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
+function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHistoryClick }) {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [openPopup, setOpenPopup] = useState(null);
   const sidebarRef = useRef(null);
+  const [searchHistory, setSearchHistory] = useState([]);
 
   const activePopupItem = useMemo(() => {
     if (!openPopup || !collapsed) return null;
@@ -125,6 +128,55 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [collapsed, onToggle]);
+
+  // 검색 기록 불러오기 및 업데이트
+  useEffect(() => {
+    const loadHistory = () => {
+      const history = getSearchHistory();
+      setSearchHistory(history);
+    };
+
+    loadHistory();
+
+    // storage 이벤트 리스너 추가 (다른 탭에서 변경 시 동기화)
+    const handleStorageChange = (e) => {
+      if (e.key === 'tracking_search_history') {
+        loadHistory();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    
+    // 커스텀 이벤트 리스너 추가 (같은 탭에서 변경 시)
+    const handleCustomStorageChange = () => {
+      loadHistory();
+    };
+    window.addEventListener('searchHistoryUpdated', handleCustomStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('searchHistoryUpdated', handleCustomStorageChange);
+    };
+  }, []);
+
+  // 검색 기록 항목 클릭 핸들러
+  const handleHistoryClick = (trackingNumber) => {
+    if (onSearchHistoryClick) {
+      onSearchHistoryClick(trackingNumber);
+    } else if (onPageChange) {
+      // 폴백: 통관 페이지로 이동
+      onPageChange('customs');
+    }
+  };
+
+  // 검색 기록 삭제 핸들러
+  const handleRemoveHistory = (e, trackingNumber) => {
+    e.stopPropagation();
+    removeSearchHistory(trackingNumber);
+    setSearchHistory(getSearchHistory());
+    // 커스텀 이벤트 발생시켜 다른 컴포넌트에 알림
+    window.dispatchEvent(new Event('searchHistoryUpdated'));
+  };
 
   return (
     <div className="relative h-full" ref={sidebarRef}>
@@ -234,30 +286,48 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle }) {
           {/* 추가 정보 섹션 - 펼쳤을 때만 표시 */}
           {!collapsed && (
             <div className="flex-1 overflow-y-auto py-4 px-4 space-y-4">
-              {/* 최근 주문내역 */}
+              {/* 최근 검색기록 */}
               <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
-                  최근 주문내역
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    최근 검색기록
+                  </h3>
+                  {searchHistory.length > 0 && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {searchHistory.length}개
+                    </span>
+                  )}
+                </div>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-slate-400">
-                      TN240112345
-                    </span>
-                    <span className="text-green-500">통관완료</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-slate-400">
-                      TN240112346
-                    </span>
-                    <span className="text-yellow-500">검사중</span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-slate-400">
-                      TN240112347
-                    </span>
-                    <span className="text-blue-500">접수완료</span>
-                  </div>
+                  {searchHistory.length > 0 ? (
+                    searchHistory.map((item, index) => (
+                      <div
+                        key={`${item.trackingNumber}-${index}`}
+                        onClick={() => handleHistoryClick(item.trackingNumber)}
+                        className="flex items-center justify-between text-xs group cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg px-2 py-1.5 transition-colors"
+                      >
+                        <span className="text-slate-600 dark:text-slate-400 truncate flex-1 mr-2">
+                          {item.trackingNumber}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={getStatusColorClass(item.status)}>
+                            {item.statusLabel}
+                          </span>
+                          <button
+                            onClick={(e) => handleRemoveHistory(e, item.trackingNumber)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded"
+                            aria-label="삭제"
+                          >
+                            <XIcon className="w-3 h-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-slate-400 dark:text-slate-500 text-center py-2">
+                      검색 기록이 없습니다
+                    </div>
+                  )}
                 </div>
               </div>
 

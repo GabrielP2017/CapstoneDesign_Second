@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useState } from 'react';
 import { Loader2, AlertTriangle, CheckCircle2, Search, LifeBuoy, Package, Beaker, Plane, Globe, Download, RotateCcw, Calculator } from 'lucide-react';
+import { saveSearchHistory } from '../../lib/searchHistory';
 
 // API 함수들
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -220,11 +221,15 @@ export default function TrackingStatus({ initialNumber, autoLookup, autoSample, 
     try {
       await new Promise(resolve => setTimeout(resolve, 500));
       const data = await getNormalizedTracking(trimmed);
+      const status = data?.summary?.status || 'UNKNOWN';
       setSummary(data?.summary || null);
       setEvents(Array.isArray(data?.normalized) ? data.normalized : []);
       setRawProviderEvents(Array.isArray(data?.raw_provider_events) ? data.raw_provider_events : []);
       setAnyEvents(Boolean(data?.any_events));
       setDetails(data?.details || null);
+      
+      // 검색 성공 시 기록에 저장
+      saveSearchHistory(trimmed, status);
     } catch (err) {
       setError(err.message || '조회 중 오류가 발생했어요.');
       setSummary(null);
