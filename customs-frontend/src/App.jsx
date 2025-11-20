@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from "react";
+﻿import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "./components/Layout/Sidebar";
 import Header from "./components/Layout/Header";
 import Dashboard from "./components/DashBoard/Dashboard";
@@ -87,13 +87,29 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage]);
 
+  // 중복 호출 방지를 위한 ref
+  const isNavigatingRef = useRef(false);
+
   // Handlers to navigate from MainPage to Customs > TrackingStatus
-  const goSearch = (number) => {
+  const goSearch = useCallback((number) => {
+    // 중복 호출 방지
+    if (isNavigatingRef.current) {
+      return;
+    }
+    
+    isNavigatingRef.current = true;
+    
+    // 상태 업데이트를 한 번에 처리
     setCurrentPage("customs");
     setActiveTab("tracking");
     setTrackIntent({ initialNumber: number, autoLookup: true });
     setTrackTriggerId((x) => x + 1);
-  };
+    
+    // 짧은 딜레이 후 플래그 리셋 (애니메이션 완료 대기)
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 300);
+  }, []);
   const goSample = () => {
     setCurrentPage("customs");
     setActiveTab("tracking");
@@ -233,7 +249,7 @@ function App() {
                   )}
 
                   {/* 기존 페이지들 (나중에 제거 예정) */}
-                  {currentPage === "dashboard" && <Dashboard />}
+                  {currentPage === "dashboard" && <Dashboard onTrackingNumberClick={goSearch} />}
                   {currentPage === "overview" && <Overview />}
                   {currentPage === "admin.shipments" && <AdminShipments />}
                   {currentPage === "myitems" && <TrackingStatus />}

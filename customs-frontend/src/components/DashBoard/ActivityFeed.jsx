@@ -1,6 +1,6 @@
 // src/components/DashBoard/ActivityFeed.jsx
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   CheckCircle,
   Clock,
@@ -10,64 +10,126 @@ import {
   Search,
   Filter,
   ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
+import { getRecentEvents } from '../../lib/api';
 
-const activities = [
-  {
-    id: 1,
-    title: '통관 완료 - #20240913-001',
-    description: '상품(스마트워치)의 통관이 완료되었습니다. 배송이 시작됩니다.',
-    time: '5분 전',
-    icon: CheckCircle,
-    color: 'text-green-500',
-    bgColor: 'bg-green-50 dark:bg-green-900/20',
-    status: '통관 완료',
-  },
-  {
-    id: 2,
-    title: '배송 중 - #20240912-002',
-    description: '상품(무선 이어폰)이 배송을 위해 출발했습니다.',
-    time: '2시간 전',
-    icon: Truck,
-    color: 'text-blue-500',
-    bgColor: 'bg-blue-50 dark:bg-blue-900/20',
-    status: '배송 중',
-  },
-  {
-    id: 3,
-    title: '세관 보류 - #20240911-003',
-    description: '상품(노트북)에 대한 서류 보완이 필요합니다. 관리자에게 문의하세요.',
-    time: '하루 전',
-    icon: Package,
-    color: 'text-amber-500',
-    bgColor: 'bg-amber-50 dark:bg-amber-900/20',
-    status: '세관 보류',
-  },
-  {
-    id: 4,
-    title: '통관 완료 - #20240910-004',
-    description: '상품(마우스)의 통관이 완료되었습니다.',
-    time: '2일 전',
-    icon: CheckCircle,
-    color: 'text-green-500',
-    bgColor: 'bg-green-50 dark:bg-green-900/20',
-    status: '통관 완료',
-  },
-  {
-    id: 5,
-    title: '반송 - #20240909-005',
-    description: '상품(키보드)이 주소지 오류로 인해 반송 처리되었습니다.',
-    time: '3일 전',
-    icon: XCircle,
-    color: 'text-red-500',
-    bgColor: 'bg-red-50 dark:bg-red-900/20',
-    status: '반송',
-  },
-];
+// 상태에 따른 아이콘 및 색상 매핑
+const getStatusIcon = (stage) => {
+  switch (stage) {
+    case 'CLEARED':
+      return CheckCircle;
+    case 'IN_PROGRESS':
+      return Truck;
+    case 'DELAY':
+      return Package;
+    default:
+      return Package;
+  }
+};
 
-function ActivityFeed() {
+const getStatusColor = (stage) => {
+  switch (stage) {
+    case 'CLEARED':
+      return {
+        icon: 'text-green-500',
+        bg: 'bg-green-50 dark:bg-green-900/20',
+      };
+    case 'IN_PROGRESS':
+      return {
+        icon: 'text-blue-500',
+        bg: 'bg-blue-50 dark:bg-blue-900/20',
+      };
+    case 'DELAY':
+      return {
+        icon: 'text-amber-500',
+        bg: 'bg-amber-50 dark:bg-amber-900/20',
+      };
+    default:
+      return {
+        icon: 'text-slate-500',
+        bg: 'bg-slate-50 dark:bg-slate-900/20',
+      };
+  }
+};
+
+function ActivityFeed({ onTrackingNumberClick }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('전체');
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const intervalRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  // 이벤트 데이터 가져오기
+  const fetchEvents = async (signal) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await getRecentEvents(20, signal);
+      
+      // API 응답을 활동 피드 형식으로 변환
+      const formattedActivities = data.map((event) => {
+        const IconComponent = getStatusIcon(event.stage);
+        const colors = getStatusColor(event.stage);
+        
+        return {
+          id: event.id,
+          title: event.title,
+          description: event.description || '',
+          time: event.time,
+          time_iso: event.time_iso,
+          icon: IconComponent,
+          color: colors.icon,
+          bgColor: colors.bg,
+          status: event.status,
+          stage: event.stage,
+          tracking_number: event.tracking_number,
+        };
+      });
+      
+      setActivities(formattedActivities);
+      setLastUpdate(new Date());
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('활동 피드 데이터 가져오기 실패:', err);
+        setError('활동 피드를 불러올 수 없습니다.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 초기 로드 및 자동 갱신 설정
+  useEffect(() => {
+    // 초기 로드
+    abortControllerRef.current = new AbortController();
+    fetchEvents(abortControllerRef.current.signal);
+
+    // 30초마다 자동 갱신
+    intervalRef.current = setInterval(() => {
+      abortControllerRef.current = new AbortController();
+      fetchEvents(abortControllerRef.current.signal);
+    }, 30000); // 30초
+
+    // cleanup
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  // 수동 새로고침
+  const handleRefresh = () => {
+    abortControllerRef.current = new AbortController();
+    fetchEvents(abortControllerRef.current.signal);
+  };
 
   // 중복 없는 상태 목록 추출
   const uniqueStatuses = ['전체', ...new Set(activities.map(a => a.status))];
@@ -90,12 +152,26 @@ function ActivityFeed() {
               활동 피드
             </h3>
             <p className='text-sm text-slate-500 dark:text-slate-400'>
-              Recent System Activities
+              {lastUpdate
+                ? `마지막 업데이트: ${lastUpdate.toLocaleTimeString('ko-KR')}`
+                : 'Recent System Activities'}
             </p>
           </div>
-          <button className='text-blue-600 hover:text-blue-700 text-sm font-medium'>
-            전체 보기
-          </button>
+          <div className='flex items-center space-x-2'>
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className='p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              title='새로고침'
+            >
+              <RefreshCw
+                className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
+              />
+            </button>
+            <button className='text-blue-600 hover:text-blue-700 text-sm font-medium'>
+              전체 보기
+            </button>
+          </div>
         </div>
         {/* 검색 및 필터 UI 추가 */}
         <div className='flex items-center space-x-2 mt-4'>
@@ -135,39 +211,75 @@ function ActivityFeed() {
         </div>
       </div>
       <div className='p-6'>
-        <div className='space-y-4'>
-          {filteredActivities.length > 0 ? (
-            filteredActivities.map((activity) => (
-              <div
-                key={activity.id}
-                className='flex items-start space-x-4 p-3 rounded-xl hover:bg-slate-50
-              dark:hover:bg-slate-800/50 transition-colors'
-              >
-                <div className={`p-2 rounded-lg ${activity.bgColor}`}>
-                  <activity.icon className={`w-5 h-5 ${activity.color}`} />
-                </div>
-                <div className='flex-1 min-w-0'>
-                  <h4 className='text-sm font-semibold text-slate-800 dark:text-white'>
-                    {activity.title}
-                  </h4>
-                  <p className='text-sm text-slate-600 dark:text-slate-400 truncate'>
-                    {activity.description}
-                  </p>
-                  <div className='flex items-center-safe space-x-1 mt-1'>
-                    <Clock className='w-3 h-3 text-slate-400' />
-                    <span className='text-xs text-slate-500 dark:text-slate-400'>
-                      {activity.time}
-                    </span>
+        {loading && activities.length === 0 ? (
+          <div className='text-center py-8 text-slate-500 dark:text-slate-400'>
+            <RefreshCw className='w-6 h-6 animate-spin mx-auto mb-2' />
+            <p>활동 피드를 불러오는 중...</p>
+          </div>
+        ) : error ? (
+          <div className='text-center py-8 text-red-500 dark:text-red-400'>
+            <p>{error}</p>
+            <button
+              onClick={handleRefresh}
+              className='mt-2 text-sm text-blue-600 hover:text-blue-700'
+            >
+              다시 시도
+            </button>
+          </div>
+        ) : (
+          <div className='space-y-4'>
+            {filteredActivities.length > 0 ? (
+              filteredActivities.map((activity) => {
+                const IconComponent = activity.icon;
+                return (
+                  <div
+                    key={activity.id}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (onTrackingNumberClick && activity.tracking_number) {
+                        onTrackingNumberClick(activity.tracking_number);
+                      }
+                    }}
+                    className='flex items-start space-x-4 p-3 rounded-xl hover:bg-slate-50
+                  dark:hover:bg-slate-800/50 transition-colors cursor-pointer'
+                  >
+                    <div className={`p-2 rounded-lg ${activity.bgColor}`}>
+                      <IconComponent className={`w-5 h-5 ${activity.color}`} />
+                    </div>
+                    <div className='flex-1 min-w-0'>
+                      <h4 className='text-sm font-semibold text-slate-800 dark:text-white'>
+                        {activity.title}
+                      </h4>
+                      <p className='text-sm text-slate-600 dark:text-slate-400 truncate'>
+                        {activity.description || '이벤트 설명 없음'}
+                      </p>
+                      <div className='flex items-center justify-between mt-2'>
+                        <div className='flex items-center space-x-1'>
+                          <Clock className='w-3 h-3 text-slate-400' />
+                          <span className='text-xs text-slate-500 dark:text-slate-400'>
+                            {activity.time}
+                          </span>
+                        </div>
+                        {activity.tracking_number && (
+                          <span className='text-xs font-mono text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300'>
+                            {activity.tracking_number}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                );
+              })
+            ) : (
+              <div className='text-center text-slate-500 dark:text-slate-400 py-8'>
+                {searchTerm || statusFilter !== '전체'
+                  ? '일치하는 활동이 없습니다.'
+                  : '활동 피드가 비어있습니다.'}
               </div>
-            ))
-          ) : (
-            <div className='text-center text-slate-500 dark:text-slate-400'>
-              일치하는 활동이 없습니다.
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

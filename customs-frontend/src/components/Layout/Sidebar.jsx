@@ -22,6 +22,7 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { getSearchHistory, removeSearchHistory, getStatusColorClass } from "../../lib/searchHistory";
+import { getRecentEvents } from "../../lib/api";
 
 // 3x3 카테고리 정의
 const categories = [
@@ -104,6 +105,9 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
   const [openPopup, setOpenPopup] = useState(null);
   const sidebarRef = useRef(null);
   const [searchHistory, setSearchHistory] = useState([]);
+  const [recentEvents, setRecentEvents] = useState([]);
+  const activityFeedIntervalRef = useRef(null);
+  const activityFeedAbortControllerRef = useRef(null);
 
   const activePopupItem = useMemo(() => {
     if (!openPopup || !collapsed) return null;
@@ -158,6 +162,53 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
       window.removeEventListener('searchHistoryUpdated', handleCustomStorageChange);
     };
   }, []);
+
+  // 활동 피드 데이터 가져오기
+  useEffect(() => {
+    const fetchActivityFeed = async (signal) => {
+      try {
+        const data = await getRecentEvents(5, signal); // 사이드바에는 최근 5개만 표시
+        setRecentEvents(data);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.error('활동 피드 데이터 가져오기 실패:', err);
+        }
+      }
+    };
+
+    // 초기 로드
+    activityFeedAbortControllerRef.current = new AbortController();
+    fetchActivityFeed(activityFeedAbortControllerRef.current.signal);
+
+    // 30초마다 자동 갱신
+    activityFeedIntervalRef.current = setInterval(() => {
+      activityFeedAbortControllerRef.current = new AbortController();
+      fetchActivityFeed(activityFeedAbortControllerRef.current.signal);
+    }, 30000);
+
+    return () => {
+      if (activityFeedIntervalRef.current) {
+        clearInterval(activityFeedIntervalRef.current);
+      }
+      if (activityFeedAbortControllerRef.current) {
+        activityFeedAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  // 상태별 색상 매핑
+  const getEventColor = (stage) => {
+    switch (stage) {
+      case 'CLEARED':
+        return 'bg-green-500';
+      case 'IN_PROGRESS':
+        return 'bg-blue-500';
+      case 'DELAY':
+        return 'bg-amber-500';
+      default:
+        return 'bg-slate-500';
+    }
+  };
 
   // 검색 기록 항목 클릭 핸들러
   const handleHistoryClick = (trackingNumber) => {
@@ -337,29 +388,45 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                   활동 피드
                 </h3>
                 <div className="space-y-3">
-                  <div className="flex items-start space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5"></div>
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        새로운 화물이 접수되었습니다
-                      </p>
-                      <span className="text-xs text-slate-500">2분 전</span>
+                  {recentEvents.length > 0 ? (
+                    recentEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (onSearchHistoryClick && event.tracking_number) {
+                            onSearchHistoryClick(event.tracking_number);
+                          }
+                        }}
+                        className="flex items-start space-x-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg p-1.5 -m-1.5 transition-colors"
+                      >
+                        <div className={`w-2 h-2 rounded-full ${getEventColor(event.stage)} mt-1.5 flex-shrink-0`}></div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                            {event.description || event.title}
+                          </p>
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-xs text-slate-500">{event.time}</span>
+                            {event.tracking_number && (
+                              <span className="text-xs font-mono text-blue-600 dark:text-blue-400 ml-2 truncate">
+                                {event.tracking_number}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-xs text-slate-400 dark:text-slate-500 text-center py-2">
+                      활동 피드가 비어있습니다
                     </div>
-                  </div>
-                  <div className="flex items-start space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500 mt-1.5"></div>
-                    <div className="flex-1">
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        통관 절차가 완료되었습니다
-                      </p>
-                      <span className="text-xs text-slate-500">1시간 전</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
 
               {/* 통관 상태별 건수 */}
-              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4">
+              {/* <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
                   통관 상태별 건수
                 </h3>
@@ -398,7 +465,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                     </span>
                   </div>
                 </div>
-              </div>
+              </div> */}
             </div>
           )}
 

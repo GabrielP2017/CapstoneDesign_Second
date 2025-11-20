@@ -153,3 +153,9 @@ export function adminSaveShipmentDetails(number, payload) {
     body: payload,
   });
 }
+
+// 최근 통관 이벤트 조회 (활동 피드용)
+export function getRecentEvents(limit = 20, signal) {
+  const query = new URLSearchParams({ limit: String(limit) }).toString();
+  return http(`/api/recent-events?${query}`, { signal });
+}
