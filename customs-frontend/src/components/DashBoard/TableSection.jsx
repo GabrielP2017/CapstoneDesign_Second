@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { MoreHorizontal, TrendingUp, ChevronDown, ChevronUp } from 'lucide-react';
-import PopularProducts from './PopularProducts';
+import React, { useState } from "react";
+import {
+  MoreHorizontal,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import PopularProducts from "./PopularProducts";
 
 const initialOrders = [
   {
@@ -38,7 +43,10 @@ const initialOrders = [
 ];
 
 function TableSection() {
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'ascending' });
+  const [sortConfig, setSortConfig] = useState({
+    key: null,
+    direction: "ascending",
+  });
   const [orders, setOrders] = useState(initialOrders);
 
   const getStatusColor = (status) => {
@@ -55,18 +63,18 @@ function TableSection() {
   };
 
   const sortTable = (key) => {
-    let direction = 'ascending';
-    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
-      direction = 'descending';
+    let direction = "ascending";
+    if (sortConfig.key === key && sortConfig.direction === "ascending") {
+      direction = "descending";
     }
     setSortConfig({ key, direction });
 
     const sortedOrders = [...orders].sort((a, b) => {
       if (a[key] < b[key]) {
-        return direction === 'ascending' ? -1 : 1;
+        return direction === "ascending" ? -1 : 1;
       }
       if (a[key] > b[key]) {
-        return direction === 'ascending' ? 1 : -1;
+        return direction === "ascending" ? 1 : -1;
       }
       return 0;
     });
@@ -76,91 +84,129 @@ function TableSection() {
 
   const getSortIcon = (key) => {
     if (sortConfig.key !== key) return null;
-    return sortConfig.direction === 'ascending' ? (
-      <ChevronUp className='w-4 h-4 ml-1' />
+    return sortConfig.direction === "ascending" ? (
+      <ChevronUp className="w-4 h-4 ml-1" />
     ) : (
-      <ChevronDown className='w-4 h-4 ml-1' />
+      <ChevronDown className="w-4 h-4 ml-1" />
     );
   };
 
   return (
-    <div className='bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50'>
-      <div className='p-6'>
-        <div className='flex items-center justify-between'>
+    <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-200/50 dark:border-slate-700/50">
+      <div className="p-6">
+        <div className="flex items-center justify-between">
           <div>
-            <h3 className='text-xl font-bold text-slate-800 dark:text-white'>
+            <h3 className="text-xl font-bold text-slate-800 dark:text-white">
               최근 목록
             </h3>
-            <p className='text-sm text-slate-500 dark:text-slate-400'>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               최근 30일 간의 주문 내역
             </p>
           </div>
-          <button className='text-blue-600 hover:text-blue-700 text-sm font-medium'>
+          <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">
             전체 보기
           </button>
         </div>
       </div>
-      <div className='overflow-x-auto'>
-        <table className='min-w-full divide-y divide-slate-200 dark:divide-slate-700'>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
           <thead>
             <tr>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('id')} className='flex items-center'>
-                  ID {getSortIcon('id')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("id")}
+                  className="flex items-center"
+                >
+                  ID {getSortIcon("id")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('product')} className='flex items-center'>
-                  상품 {getSortIcon('product')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("product")}
+                  className="flex items-center"
+                >
+                  상품 {getSortIcon("product")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('customer')} className='flex items-center'>
-                  고객 {getSortIcon('customer')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("customer")}
+                  className="flex items-center"
+                >
+                  고객 {getSortIcon("customer")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('amount')} className='flex items-center'>
-                  가격 {getSortIcon('amount')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("amount")}
+                  className="flex items-center"
+                >
+                  가격 {getSortIcon("amount")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('status')} className='flex items-center'>
-                  상태 {getSortIcon('status')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("status")}
+                  className="flex items-center"
+                >
+                  상태 {getSortIcon("status")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <button onClick={() => sortTable('date')} className='flex items-center'>
-                  날짜 {getSortIcon('date')}
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <button
+                  onClick={() => sortTable("date")}
+                  className="flex items-center"
+                >
+                  날짜 {getSortIcon("date")}
                 </button>
               </th>
-              <th className='p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400'>
-                <span className='sr-only'>Actions</span>
+              <th className="p-4 text-left text-sm font-semibold text-slate-500 dark:text-slate-400">
+                <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
-          <tbody className='divide-y divide-slate-200/50 dark:divide-slate-700/50'>
+          <tbody className="divide-y divide-slate-200/50 dark:divide-slate-700/50">
             {orders.length > 0 ? (
               orders.map((order) => (
-                <tr key={order.id} className='hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors'>
-                  <td className='p-4 text-sm font-medium text-blue-600 dark:text-blue-400'>{order.id}</td>
-                  <td className='p-4 text-sm text-slate-800 dark:text-white'>{order.product}</td>
-                  <td className='p-4 text-sm text-slate-800 dark:text-white'>{order.customer}</td>
-                  <td className='p-4 text-sm text-slate-800 dark:text-white'>{order.amount}</td>
-                  <td className='p-4'>
-                    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(order.status)}`}>
+                <tr
+                  key={order.id}
+                  className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors"
+                >
+                  <td className="p-4 text-sm font-medium text-blue-600 dark:text-blue-400">
+                    {order.id}
+                  </td>
+                  <td className="p-4 text-sm text-slate-800 dark:text-white">
+                    {order.product}
+                  </td>
+                  <td className="p-4 text-sm text-slate-800 dark:text-white">
+                    {order.customer}
+                  </td>
+                  <td className="p-4 text-sm text-slate-800 dark:text-white">
+                    {order.amount}
+                  </td>
+                  <td className="p-4">
+                    <span
+                      className={`text-xs font-semibold px-2 py-1 rounded-full ${getStatusColor(
+                        order.status
+                      )}`}
+                    >
                       {order.status}
                     </span>
                   </td>
-                  <td className='p-4 text-sm text-slate-800 dark:text-white'>{order.date}</td>
-                  <td className='p-4 text-right'>
-                    <MoreHorizontal className='w-4 h-4 text-slate-400' />
+                  <td className="p-4 text-sm text-slate-800 dark:text-white">
+                    {order.date}
+                  </td>
+                  <td className="p-4 text-right">
+                    <MoreHorizontal className="w-4 h-4 text-slate-400" />
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="7" className="p-4 text-center text-slate-500 dark:text-slate-400">
+                <td
+                  colSpan="7"
+                  className="p-4 text-center text-slate-500 dark:text-slate-400"
+                >
                   데이터가 없습니다.
                 </td>
               </tr>
@@ -169,7 +215,7 @@ function TableSection() {
         </table>
       </div>
       {/* Popular Products section */}
-      <div className='p-6 border-t border-slate-200/50 dark:border-slate-700/50'>
+      <div className="p-6 border-t border-slate-200/50 dark:border-slate-700/50">
         {/* Popular Products section을 컴포넌트로 대체 */}
         <PopularProducts />
       </div>
