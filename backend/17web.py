@@ -53,8 +53,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import UniqueConstraint, ForeignKey
 import pandas as pd
 import numpy as np
+from be4_module import register_be4
 
 app = FastAPI(title="17TRACK Customs Filter Enhanced")
+register_be4(app)
 
 FRONTEND_ORIGINS = [
     origin.strip()

@@ -300,7 +300,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                   onClick={onToggle}
                   aria-label="toggle-sidebar"
                   className="w-full flex items-center justify-center py-2.5 rounded-xl
-                  bg-slate-100/80 dark:bg-slate-800/70 text-slate-700 dark:text-slate-100
+                  text-slate-700 dark:text-slate-100
                   hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
                 >
                   <Menu className="w-5 h-5" />
@@ -319,7 +319,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                           ${
                             isActive
                               ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25"
-                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50"
+                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
                           }`}
                       >
                         <Icon className="w-5 h-5" />

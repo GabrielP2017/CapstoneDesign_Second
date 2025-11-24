@@ -96,15 +96,15 @@ function App() {
     if (isNavigatingRef.current) {
       return;
     }
-    
+
     isNavigatingRef.current = true;
-    
+
     // 상태 업데이트를 한 번에 처리
     setCurrentPage("customs");
     setActiveTab("tracking");
     setTrackIntent({ initialNumber: number, autoLookup: true });
     setTrackTriggerId((x) => x + 1);
-    
+
     // 짧은 딜레이 후 플래그 리셋 (애니메이션 완료 대기)
     setTimeout(() => {
       isNavigatingRef.current = false;
@@ -162,7 +162,7 @@ function App() {
               style={{ backgroundImage: `url(${bg})` }}
             />
           ))}
-          <div className="absolute inset-0 bg-white/40 dark:bg-slate-950/65 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 bg-white/60 dark:bg-slate-950/65 backdrop-blur-[2px]" />
           <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-white/0 to-white dark:to-slate-950" />
         </div>
       )}
@@ -186,6 +186,10 @@ function App() {
             onGoHome={() => {
               setCurrentPage("mainpage");
               setActiveTab(null);
+            }}
+            onOpenNotifications={() => {
+              setCurrentPage("notifications");
+              setActiveTab("customs");
             }}
           />
 
@@ -249,7 +253,9 @@ function App() {
                   )}
 
                   {/* 기존 페이지들 (나중에 제거 예정) */}
-                  {currentPage === "dashboard" && <Dashboard onTrackingNumberClick={goSearch} />}
+                  {currentPage === "dashboard" && (
+                    <Dashboard onTrackingNumberClick={goSearch} />
+                  )}
                   {currentPage === "overview" && <Overview />}
                   {currentPage === "admin.shipments" && <AdminShipments />}
                   {currentPage === "myitems" && <TrackingStatus />}
