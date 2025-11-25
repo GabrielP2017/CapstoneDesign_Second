@@ -70,8 +70,14 @@ function RegulationNoticeBoard() {
           },
           controller.signal
         );
-        setNotices(payload || []);
+        const nextNotices = payload || [];
+        setNotices(nextNotices);
         setError(null);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("regulationNoticesUpdated", { detail: nextNotices })
+          );
+        }
       } catch (err) {
         if (err.name === "AbortError") return;
         setError(err.message || "공지 목록을 가져오지 못했습니다.");

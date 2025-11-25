@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import TitleIcon from "../../../img/TitleIcon.png";
 import TitleFont from "../../../img/TitleFont.png";
-import { getNoticeHighlights, API_BASE_URL } from "../../lib/api";
+import { getRegulationNotices, API_BASE_URL } from "../../lib/api";
 
 const NOTICE_BADGES = {
   INFO: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-200",
@@ -62,6 +62,9 @@ function Header({
   const [noticeLoading, setNoticeLoading] = useState(false);
   const [noticeError, setNoticeError] = useState(null);
   const [noticeUpdatedAt, setNoticeUpdatedAt] = useState(null);
+  const [noticeDataKey, setNoticeDataKey] = useState("");
+  const [lastSeenNoticeKey, setLastSeenNoticeKey] = useState("");
+  const [unreadNoticeCount, setUnreadNoticeCount] = useState(0);
   const noticeWrapperRef = useRef(null);
 
   useEffect(() => {
@@ -76,24 +79,48 @@ function Header({
 
   const toggleDarkMode = () => setIsDarkMode((prevMode) => !prevMode);
 
+  const buildNoticeKey = useCallback((list) => {
+    return (Array.isArray(list) ? list : [])
+      .map((item) => item?.id || item?.title || item?.url || "")
+      .join("|");
+  }, []);
+
   const fetchNoticeHighlights = useCallback(async () => {
     setNoticeLoading(true);
     try {
-      const data = await getNoticeHighlights(4);
-      setNoticeHighlights(Array.isArray(data) ? data : []);
+      const data = await getRegulationNotices({ limit: 4 });
+      const nextHighlights = Array.isArray(data) ? data : [];
+      const nextKey = buildNoticeKey(nextHighlights);
+      setNoticeHighlights(nextHighlights);
+      setNoticeDataKey(nextKey);
       setNoticeError(null);
       setNoticeUpdatedAt(new Date());
+
+      if (showNoticePanel) {
+        setLastSeenNoticeKey(nextKey);
+        setUnreadNoticeCount(0);
+      } else {
+        setUnreadNoticeCount(
+          nextKey && nextKey !== lastSeenNoticeKey ? nextHighlights.length : 0
+        );
+      }
     } catch (error) {
-      setNoticeError("통관 공지를 불러오지 못했습니다.");
+      setNoticeError("통관 알림을 불러오지 못했습니다.");
     } finally {
       setNoticeLoading(false);
     }
-  }, []);
+  }, [buildNoticeKey, lastSeenNoticeKey, showNoticePanel]);
 
   useEffect(() => {
     fetchNoticeHighlights();
     const id = setInterval(fetchNoticeHighlights, 60000);
     return () => clearInterval(id);
+  }, [fetchNoticeHighlights]);
+
+  useEffect(() => {
+    const handler = () => fetchNoticeHighlights();
+    window.addEventListener("regulationNoticesUpdated", handler);
+    return () => window.removeEventListener("regulationNoticesUpdated", handler);
   }, [fetchNoticeHighlights]);
 
   useEffect(() => {
@@ -117,7 +144,11 @@ function Header({
   const toggleNoticePanel = () => {
     setShowNoticePanel((prev) => {
       const next = !prev;
-      if (next && noticeHighlights.length === 0 && !noticeLoading) {
+      if (next) {
+        setLastSeenNoticeKey(noticeDataKey);
+        setUnreadNoticeCount(0);
+      }
+      if (next && !noticeLoading) {
         fetchNoticeHighlights();
       }
       return next;
@@ -206,9 +237,11 @@ function Header({
               className="relative p-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
             >
               <Bell className="w-5 h-5" />
-              <span className="absolute -top-1 -right-1 min-w-[20px] h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center border-2 border-white dark:border-slate-900">
-                {noticeHighlights.length}
-              </span>
+              {unreadNoticeCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[20px] h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center border-2 border-white dark:border-slate-900">
+                  {unreadNoticeCount}
+                </span>
+              )}
             </button>
             {showNoticePanel && (
               <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-950/95 shadow-2xl p-4 space-y-4">
