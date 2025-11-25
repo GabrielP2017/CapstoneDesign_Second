@@ -5,7 +5,7 @@ import TableSection from './TableSection';
 import ActivityFeed from './ActivityFeed';
 import TrackingStatus from './TrackingStatus';
 
-function Dashboard() {
+function Dashboard({ onTrackingNumberClick }) {
 	return (
 		<div className='space-y-6'>
 
@@ -23,7 +23,7 @@ function Dashboard() {
 					<TableSection />
 				</div>
 				<div>
-					<ActivityFeed />
+					<ActivityFeed onTrackingNumberClick={onTrackingNumberClick} />
 				</div>
 			</div>
 		</div>

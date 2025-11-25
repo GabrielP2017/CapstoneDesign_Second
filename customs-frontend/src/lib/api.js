@@ -1,5 +1,5 @@
 ﻿const defaultBase = "http://localhost:8000";
-const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || defaultBase).replace(/\/$/, "");
+export const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || defaultBase).replace(/\/$/, "");
 
 async function http(path, { method = "GET", body, headers, signal } = {}) {
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
@@ -30,7 +30,11 @@ async function http(path, { method = "GET", body, headers, signal } = {}) {
         detail = res.statusText;
       }
     } else {
-      try { detail = await res.text(); } catch { detail = res.statusText; }
+      try {
+        detail = await res.text();
+      } catch {
+        detail = res.statusText;
+      }
     }
     throw new Error(`API ${res.status} ${res.statusText}: ${detail}`);
   }
@@ -40,12 +44,12 @@ async function http(path, { method = "GET", body, headers, signal } = {}) {
   return res.text();
 }
 
-// ========== Admin & User (원본 유지) ==========
+// ========== Admin & User (관리자/사용자 공용) ==========
 export function adminSeedSample10(signal) {
   return http("/admin/seed-sample-10", { method: "POST", signal });
 }
 
-// 구버튼 호환: 내부적으로 새 동기화 엔드포인트 호출하도록 라우팅
+// 17TRACK JSON 파일을 DB와 동기화
 export function adminFetch17track10(signal) {
   return adminSyncFromFile(signal);
 }
@@ -75,9 +79,9 @@ export function triggerTestWebhook(params = {}, signal) {
   });
 }
 
-// ========== 새로 추가 ==========
+// ========== 관리자 전용 도구 ==========
 
-// 1) DB 동기화 (백엔드: /admin/fetch-from-file)
+// 1) JSON 파일을 DB로 적재 (기본 경로: tracking_numbers.json)
 export function adminSyncFromFile(params = {}, signal) {
   const qs = new URLSearchParams();
   if (params.path) qs.set("path", params.path);
@@ -86,7 +90,7 @@ export function adminSyncFromFile(params = {}, signal) {
   return http(`/admin/fetch-from-file${q}`, { method: "POST", signal });
 }
 
-// 2) DB 목록 (백엔드: /user/trackings 응답 → 화면 공통 형태로 변환)
+// 2) 사용자 목록 API를 관리자 테이블 형태로 가공
 export async function adminListTrackings(signal) {
   const raw = await userListTrackings(signal).catch(() => []);
   if (!Array.isArray(raw)) return [];
@@ -123,7 +127,9 @@ export async function adminListTrackings(signal) {
     const source =
       r.source ??
       (typeof r.any_events !== "undefined"
-        ? r.any_events ? "17TRACK" : "DB"
+        ? r.any_events
+          ? "17TRACK"
+          : "DB"
         : "DB");
 
     return {
@@ -134,15 +140,12 @@ export async function adminListTrackings(signal) {
       source,
     };
   });
-  }
-  
+}
 
-  // [NEW] 단일 운송장 이벤트 조회
-  export function adminGetShipmentEvents(number, signal) {
-    return http(`/admin/shipments/${encodeURIComponent(number)}/events`, { signal });
-  }
+export function adminGetShipmentEvents(number, signal) {
+  return http(`/admin/shipments/${encodeURIComponent(number)}/events`, { signal });
+}
 
-  // 이미 있는 http 래퍼 사용
 export function adminGetShipmentDetails(number, signal) {
   return http(`/admin/shipments/${encodeURIComponent(number)}/details`, { signal });
 }
@@ -152,4 +155,41 @@ export function adminSaveShipmentDetails(number, payload) {
     method: "PUT",
     body: payload,
   });
+}
+
+// ========== 실시간 이벤트 / BE4 ==========
+
+export function getRecentEvents(limit = 20, signal) {
+  const query = new URLSearchParams({ limit: String(limit) }).toString();
+  return http(`/api/recent-events?${query}`, { signal });
+}
+
+export function getRuleLibrary(signal) {
+  return http("/be4/rules/library", { signal });
+}
+
+export function evaluateRule(payload, signal) {
+  return http("/be4/rules/evaluate", {
+    method: "POST",
+    body: payload,
+    signal,
+  });
+}
+
+export function getRegulationNotices(params = {}, signal) {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.category) qs.set("category", params.category);
+  if (params.source) qs.set("source", params.source);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return http(`/be4/notices${suffix}`, { signal });
+}
+
+export function getNoticeHighlights(limit = 3, signal) {
+  const query = new URLSearchParams({ limit: String(limit) }).toString();
+  return http(`/be4/notices/highlights?${query}`, { signal });
+}
+
+export function refreshRegulationNotices(signal) {
+  return http("/be4/notices/refresh", { method: "POST", signal });
 }

@@ -1,0 +1,207 @@
+{
+  "currency_rates": {
+    "KRW": 1,
+    "USD": 1350,
+    "EUR": 1480,
+    "JPY": 9.1,
+    "CNY": 190,
+    "HKD": 173,
+    "SGD": 1010
+  },
+  "rule_entries": [
+    {
+      "id": "SMALL_DUTY_STANDARD",
+      "title": "소액면세 150달러 기준",
+      "summary": "해외직구 물품가액이 미화 150달러 이하(운임 포함)인 경우 관세 및 부가세가 면제됩니다.",
+      "risk_label": "정상 면세",
+      "risk_level": "LOW",
+      "implication": "일반 목록통관 가능",
+      "priority": 10,
+      "conditions": {
+        "max_value_usd": 150,
+        "shipping_methods": ["express", "postal"],
+        "recipient_types": ["personal"]
+      },
+      "reference_urls": [
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2156&bbsId=1173"
+      ]
+    },
+    {
+      "id": "SMALL_DUTY_US_EXPRESS",
+      "title": "미국발 특송 200달러 예외",
+      "summary": "미국에서 특송으로 들어오는 자가 사용 물품은 200달러까지 면세 한도가 적용됩니다.",
+      "risk_label": "정상 면세",
+      "risk_level": "LOW",
+      "implication": "미국발 특송 한도 적용",
+      "priority": 15,
+      "conditions": {
+        "max_value_usd": 200,
+        "origin_countries": ["US", "USA", "UNITED STATES"],
+        "shipping_methods": ["express"],
+        "recipient_types": ["personal"]
+      },
+      "reference_urls": [
+        "https://unipass.customs.go.kr/csp/ptl/catView.do?catId=3507"
+      ]
+    },
+    {
+      "id": "COMBINED_TAX_ALERT",
+      "title": "합산과세 위험",
+      "summary": "같은 날 입항하는 해외직구 물품을 합산하여 과세할 수 있습니다. 2022년 개선 이후 서로 다른 날 주문한 물품은 예외로 분리 통관이 가능합니다.",
+      "risk_label": "합산과세 위험",
+      "risk_level": "HIGH",
+      "implication": "동일 입항일 합산 대상",
+      "priority": 90,
+      "conditions": {
+        "same_day_combined": true
+      },
+      "reference_urls": [
+        "https://www.customs.go.kr/kcs/ad/external/na/ntt/selectNttInfo.do?mi=2154&nttSn=1327438"
+      ]
+    },
+    {
+      "id": "LIST_CLEARANCE_RESTRICTED",
+      "title": "목록통관 배제 품목",
+      "summary": "의약품, 주류, 건강기능식품 등은 목록통관이 불가하며 일반 수입신고 및 추가 서류가 필요합니다.",
+      "risk_label": "목록통관 배제 품목",
+      "risk_level": "HIGH",
+      "implication": "일반 통관 필요",
+      "priority": 95,
+      "conditions": {
+        "restricted_categories": [
+          "medicine",
+          "health_food",
+          "firearm",
+          "battery",
+          "hazardous"
+        ]
+      },
+      "reference_urls": [
+        "https://unipass.customs.go.kr/csp/ptl/CstmWrhousrMdmUldList.do",
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2158&nttSn=1326179"
+      ]
+    },
+    {
+      "id": "BUSINESS_IMPORT_NOTICE",
+      "title": "사업자 통관",
+      "summary": "사업자 명의 통관은 면세 대상이라도 정식 수입신고 및 납세의무가 발생합니다.",
+      "risk_label": "사업자 통관 유의",
+      "risk_level": "MEDIUM",
+      "implication": "세액 정산 필요",
+      "priority": 40,
+      "conditions": {
+        "recipient_types": ["business"]
+      },
+      "reference_urls": [
+        "https://www.customs.go.kr/kcs/fp/kr/etc/etc.do"
+      ]
+    }
+  ],
+  "category_profiles": [
+    {
+      "id": "general_goods",
+      "title": "일반 잡화",
+      "duty_rate": 0.08,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "LOW",
+      "reference_urls": [
+        "https://www.customs.go.kr"
+      ]
+    },
+    {
+      "id": "electronics",
+      "title": "전자제품",
+      "duty_rate": 0.08,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "MEDIUM",
+      "reference_urls": [
+        "https://unipass.customs.go.kr/csp/index.do"
+      ],
+      "notes": "KC 인증 및 전파인증 등 추가 서류 가능"
+    },
+    {
+      "id": "fashion",
+      "title": "패션/의류",
+      "duty_rate": 0.13,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "MEDIUM",
+      "reference_urls": [
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2151&bbsId=1187"
+      ]
+    },
+    {
+      "id": "health_food",
+      "title": "건강기능식품/식품",
+      "duty_rate": 0.08,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "HIGH",
+      "reference_urls": [
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2320&bbsId=2074"
+      ],
+      "notes": "검역 서류 요구 가능"
+    },
+    {
+      "id": "cosmetics",
+      "title": "화장품",
+      "duty_rate": 0.13,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "MEDIUM",
+      "reference_urls": [
+        "https://www.customs.go.kr/kcs/ad/atc/CstmImexGuide.do"
+      ],
+      "notes": "표시기준 위반 여부 확인 필요"
+    },
+    {
+      "id": "luxury",
+      "title": "명품/고가품",
+      "duty_rate": 0.13,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0.2,
+      "base_risk": "HIGH",
+      "reference_urls": [
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2151&bbsId=1187"
+      ],
+      "notes": "개별소비세 부과 가능"
+    },
+    {
+      "id": "medicine",
+      "title": "의약품/의료기기",
+      "duty_rate": 0.08,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "HIGH",
+      "reference_urls": [
+        "https://www.customs.go.kr/kcs/ad/expImp/trade/Trade.do"
+      ],
+      "notes": "목록통관 불가, 처방전 필요"
+    },
+    {
+      "id": "battery",
+      "title": "배터리/위험물",
+      "duty_rate": 0.08,
+      "vat_rate": 0.1,
+      "special_tax_rate": 0,
+      "base_risk": "HIGH",
+      "reference_urls": [
+        "https://www.customs.go.kr/customs/na/ntt/selectNttInfo.do?mi=2154&bbsId=1184"
+      ],
+      "notes": "항공 운송 제한"
+    },
+    {
+      "id": "documents",
+      "title": "서류/인증서",
+      "duty_rate": 0,
+      "vat_rate": 0,
+      "special_tax_rate": 0,
+      "base_risk": "LOW",
+      "reference_urls": [
+        "https://www.customs.go.kr"
+      ]
+    }
+  ]
+}

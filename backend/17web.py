@@ -53,8 +53,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import UniqueConstraint, ForeignKey
 import pandas as pd
 import numpy as np
+from be4_module import register_be4
 
 app = FastAPI(title="17TRACK Customs Filter Enhanced")
+register_be4(app)
 
 FRONTEND_ORIGINS = [
     origin.strip()
@@ -1511,6 +1513,149 @@ def admin_list_shipments():
 def user_trackings():
     """사용자: DB의 모든 운송장 목록 (같은 포맷)"""
     return admin_shipments()
+
+def translate_event_description(desc: str, stage: str) -> str:
+    """이벤트 설명을 한국어로 번역"""
+    if not desc:
+        return ""
+    
+    desc_lower = desc.lower().strip()
+    
+    # 통관 완료 관련
+    if stage == "CLEARED":
+        if any(kw in desc_lower for kw in ["released", "cleared", "complete", "approved", "통과", "완료", "해제"]):
+            if "customs" in desc_lower or "통관" in desc:
+                return "통관이 완료되었습니다"
+            return "처리가 완료되었습니다"
+        return "통관 완료"
+    
+    # 통관 진행 중 관련
+    if stage == "IN_PROGRESS":
+        if any(kw in desc_lower for kw in ["presented", "arrived", "processing", "underway", "진행", "도착", "접수"]):
+            if "customs" in desc_lower or "통관" in desc:
+                return "통관 절차가 진행 중입니다"
+            if "arrived" in desc_lower or "도착" in desc:
+                return "화물이 도착했습니다"
+            return "처리가 진행 중입니다"
+        return "통관 진행 중"
+    
+    # 세관 보류 관련
+    if stage == "DELAY":
+        if any(kw in desc_lower for kw in ["delay", "hold", "required", "documentation", "지연", "보류", "요청"]):
+            if "information" in desc_lower or "document" in desc_lower or "서류" in desc or "정보" in desc:
+                return "서류 보완이 필요합니다"
+            if "customs" in desc_lower or "통관" in desc:
+                return "통관이 지연되고 있습니다"
+            return "처리가 보류되었습니다"
+        return "세관 보류"
+    
+    # 일반적인 패턴 매칭
+    translations = {
+        # 영어 패턴
+        "presented to customs": "세관에 제출되었습니다",
+        "customs clearance": "통관 절차",
+        "customs processing": "통관 처리 중",
+        "released from customs": "세관에서 방출되었습니다",
+        "held by customs": "세관에서 보류 중",
+        "customs clearance information required": "통관 정보가 필요합니다",
+        "arrived at": "도착했습니다",
+        "departed from": "출발했습니다",
+        "in transit": "운송 중",
+        "out for delivery": "배송 출발",
+        "delivered": "배송 완료",
+        
+        # 중국어 패턴 (간단한 매핑)
+        "清关": "통관",
+        "清关完成": "통관 완료",
+        "清关中": "통관 진행 중",
+        "已交海关": "세관에 제출됨",
+        "海关放行": "세관 방출",
+        "海关扣留": "세관 보류",
+        
+        # 일본어 패턴
+        "通関": "통관",
+        "通関完了": "통관 완료",
+        "通関手続き中": "통관 절차 진행 중",
+    }
+    
+    # 직접 매칭 시도
+    for pattern, translation in translations.items():
+        if pattern.lower() in desc_lower:
+            return translation
+    
+    # 한국어가 이미 포함되어 있으면 그대로 반환
+    if any(ord(char) >= 0xAC00 and ord(char) <= 0xD7A3 for char in desc):
+        return desc
+    
+    # 기본값: 원문 반환하되 상태 정보 추가
+    return desc
+
+
+@app.get("/api/recent-events")
+def get_recent_events(limit: int = Query(20, ge=1, le=100)):
+    """최근 통관 이벤트 조회 (활동 피드용)"""
+    with get_db() as db:
+        rows = (
+            db.query(ShipmentEvent)
+              .join(Shipment, ShipmentEvent.shipment_id == Shipment.id)
+              .order_by(ShipmentEvent.ts.desc())
+              .limit(limit)
+              .all()
+        )
+        
+        # 이벤트가 없으면 빈 배열 반환
+        if not rows:
+            return []
+        
+        # 응답 포맷: 활동 피드에 필요한 정보 포함
+        result = []
+        for r in rows:
+            # 상태에 따른 한글 표시
+            status_ko = {
+                "CLEARED": "통관 완료",
+                "IN_PROGRESS": "통관 진행 중",
+                "DELAY": "세관 보류",
+                "UNKNOWN": "확인 중"
+            }.get(r.stage, "확인 중")
+            
+            # 이벤트 설명 한국어 번역
+            description_ko = translate_event_description(r.desc or "", r.stage)
+            
+            # 상대 시간 계산
+            now = datetime.now(timezone.utc)
+            if r.ts.tzinfo is None:
+                event_time = r.ts.replace(tzinfo=timezone.utc)
+            else:
+                event_time = r.ts
+            diff = now - event_time
+            
+            if diff.total_seconds() < 60:
+                time_ago = "방금 전"
+            elif diff.total_seconds() < 3600:
+                minutes = int(diff.total_seconds() / 60)
+                time_ago = f"{minutes}분 전"
+            elif diff.total_seconds() < 86400:
+                hours = int(diff.total_seconds() / 3600)
+                time_ago = f"{hours}시간 전"
+            elif diff.days < 7:
+                days = diff.days
+                time_ago = f"{days}일 전"
+            else:
+                time_ago = event_time.strftime("%Y-%m-%d")
+            
+            result.append({
+                "id": r.id,
+                "tracking_number": r.tracking_number,
+                "title": f"{status_ko} - #{r.tracking_number[-8:]}",
+                "description": description_ko,
+                "time": time_ago,
+                "time_iso": r.ts.isoformat() if hasattr(r.ts, "isoformat") else str(r.ts),
+                "stage": r.stage,
+                "status": status_ko,
+                "source": r.source or "unknown"
+            })
+        
+        return result
 
 
 @app.get("/admin/shipments/{number}/events")
