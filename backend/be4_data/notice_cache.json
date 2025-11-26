@@ -2002,5 +2002,37 @@
       "시스템 점검"
     ],
     "is_fallback": false
+  },
+  {
+    "id": "83c0c6470de436f752836a7a440934a619f63e98",
+    "source": "kcs_public_notice",
+    "source_name": "관세청 공고",
+    "title": "제5회 관세인재개발원 공무직 (HRD 담당 교육연구사) 채용 공고",
+    "summary": "관세인재개발원 공고 제2025 - 19호제5회 관세인재개발원 공무직 (HRD 담당 교육연구사) 채용 공고2025년도 제5회 관세인재개발원 공무직(HRD 담당 교육연구사) 채용 시행계획을 다음과 같이 공고하오니 역량 있는 인재의 많은 응모 바랍니다.2025년 11월 26일관세인재개발원장",
+    "published_at": "2025-11-26T00:21:12+00:00",
+    "url": "http://www.customs.go.kr/kcs/na/ntt/selectNttInfo.do?mi=2895&nttSn=10152846&bbsId=1364",
+    "official_url": "http://www.customs.go.kr/kcs/na/ntt/selectNttInfo.do?mi=2895&nttSn=10152846&bbsId=1364",
+    "category": "관세",
+    "risk_level": "WATCH",
+    "tags": [
+      "관세"
+    ],
+    "is_fallback": false
+  },
+  {
+    "id": "0d8f00ee9e6d0e4ab9ae2f307407a1b1aee84a4d",
+    "source": "easylaw_notice",
+    "source_name": "생활법령 공지",
+    "title": "(공지) 2025년 11월 찾기 쉬운 생활법령정보 뉴스레터",
+    "summary": "",
+    "published_at": "2025-11-26T01:41:07+00:00",
+    "url": "https://www.easylaw.go.kr/CSP/NtcRetrieve01.laf?ntcSeq=1727&topMenu=introUl1",
+    "official_url": "https://www.easylaw.go.kr/CSP/NtcRetrieve01.laf?ntcSeq=1727&topMenu=introUl1",
+    "category": "법령 개정",
+    "risk_level": "WATCH",
+    "tags": [
+      "법령 개정"
+    ],
+    "is_fallback": false
   }
 ]

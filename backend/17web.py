@@ -1592,70 +1592,180 @@ def translate_event_description(desc: str, stage: str) -> str:
 
 
 @app.get("/api/recent-events")
-def get_recent_events(limit: int = Query(20, ge=1, le=100)):
-    """최근 통관 이벤트 조회 (활동 피드용)"""
-    with get_db() as db:
-        rows = (
-            db.query(ShipmentEvent)
-              .join(Shipment, ShipmentEvent.shipment_id == Shipment.id)
-              .order_by(ShipmentEvent.ts.desc())
-              .limit(limit)
-              .all()
-        )
+async def get_recent_events(
+    limit: int = Query(20, ge=1, le=100),
+    tracking_numbers: Optional[str] = Query(None, description="쉼표로 구분된 운송장 번호 목록 (필터링용)")
+):
+    """최근 통관 이벤트 조회 (활동 피드용) - 17track API에서 직접 조회"""
+    print(f"[recent-events] 요청 받음: limit={limit}, tracking_numbers={tracking_numbers}")
+    
+    # tracking_numbers 파라미터가 필수
+    if not tracking_numbers:
+        print(f"[recent-events] 경고: tracking_numbers 파라미터가 없음. 빈 배열 반환")
+        return []
+    
+    # 쉼표로 구분된 운송장 번호 목록 파싱
+    numbers_list = [num.strip() for num in tracking_numbers.split(",") if num.strip()]
+    if not numbers_list:
+        print(f"[recent-events] 경고: 파싱된 운송장 번호가 없음. 빈 배열 반환")
+        return []
+    
+    print(f"[recent-events] 조회할 운송장 번호: {numbers_list}")
+    
+    # 17track API에서 직접 조회
+    result = []
+    
+    # 40개씩 배치로 나누어 조회 (17track API 제한)
+    for chunk in _chunked(numbers_list, 40):
+        try:
+            # 17track API 호출
+            print(f"[recent-events] 17track API 호출 중: {len(chunk)}개 운송장")
+            payload = await get_trackinfo(chunk)
+            print(f"[recent-events] 17track API 응답 받음: type={type(payload)}, keys={list(payload.keys()) if isinstance(payload, dict) else 'not dict'}")
+        except Exception as e:
+            print(f"[recent-events] 17track API 호출 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
         
-        # 이벤트가 없으면 빈 배열 반환
-        if not rows:
-            return []
+        # 스키마 방어: payload에서 track 정보 추출
+        tracks: List[Dict[str, Any]] = []
+        if isinstance(payload, list):
+            tracks = payload
+        elif isinstance(payload, dict):
+            data_obj = payload.get("data")
+            if isinstance(data_obj, dict):
+                buckets: List[Dict[str, Any]] = []
+                for key in ("accepted", "result", "list"):
+                    v = data_obj.get(key)
+                    if isinstance(v, list):
+                        buckets.extend(v)
+                tracks = buckets
+            elif isinstance(payload.get("result"), list) or isinstance(payload.get("list"), list):
+                tracks = payload.get("result") or payload.get("list") or []
+            elif payload.get("number"):
+                tracks = [payload]
         
-        # 응답 포맷: 활동 피드에 필요한 정보 포함
-        result = []
-        for r in rows:
+        if not tracks:
+            print(f"[recent-events] 경고: payload에서 tracks를 찾을 수 없음. payload type={type(payload)}, keys={list(payload.keys()) if isinstance(payload, dict) else 'not dict'}")
+            continue
+        
+        print(f"[recent-events] 추출된 tracks 수: {len(tracks)}")
+        
+        # 각 운송장의 최신 이벤트 추출
+        for item in tracks:
+            if not isinstance(item, dict):
+                continue
+            
+            num = item.get("number") or item.get("no") or item.get("tracking") or ""
+            if not num:
+                continue
+            
+            track_obj = item.get("track") or item.get("track_info") or item
+            
+            # 이벤트 정규화 (통관 이벤트 우선)
+            normalized = normalize_from_track(track_obj or {})
+            
+            # 통관 이벤트가 없으면 최신 일반 이벤트 추출
+            if not normalized:
+                print(f"[recent-events] 통관 이벤트 없음: {num}, track_obj type={type(track_obj)}, keys={list(track_obj.keys()) if isinstance(track_obj, dict) else 'not dict'}")
+                # v2 providers에서 최신 이벤트 추출
+                ti = _ti_view(track_obj or {})
+                providers = (((ti.get("tracking") or {}).get("providers")) or [])
+                latest_general_event = None
+                latest_time = None
+                
+                for prov in providers:
+                    for e in (prov.get("events") or []):
+                        ts = _parse_multi_time(e)
+                        if ts and (latest_time is None or ts > latest_time):
+                            latest_time = ts
+                            latest_general_event = {
+                                "ts": ts,
+                                "stage": "UNKNOWN",
+                                "desc": (e.get("description") or "").strip() or "이벤트 정보 없음"
+                            }
+                
+                # latest_event에서도 확인
+                le = ti.get("latest_event")
+                if le:
+                    ts = _parse_multi_time(le)
+                    if ts and (latest_time is None or ts > latest_time):
+                        latest_time = ts
+                        latest_general_event = {
+                            "ts": ts,
+                            "stage": "UNKNOWN",
+                            "desc": (le.get("description") or "").strip() or "이벤트 정보 없음"
+                        }
+                
+                if latest_general_event:
+                    print(f"[recent-events] 최신 일반 이벤트 사용: {num}, desc={latest_general_event.get('desc', '')[:50]}")
+                    normalized = [latest_general_event]
+                else:
+                    print(f"[recent-events] 이벤트 없음: {num}")
+                    continue
+            
+            # 최신 이벤트 (가장 최근 시간)
+            latest_event = max(normalized, key=lambda e: e.get("ts") or datetime.min.replace(tzinfo=timezone.utc))
+            
+            stage = latest_event.get("stage", "UNKNOWN")
+            desc = latest_event.get("desc", "")
+            event_time = latest_event.get("ts")
+            
             # 상태에 따른 한글 표시
             status_ko = {
                 "CLEARED": "통관 완료",
                 "IN_PROGRESS": "통관 진행 중",
                 "DELAY": "세관 보류",
                 "UNKNOWN": "확인 중"
-            }.get(r.stage, "확인 중")
+            }.get(stage, "확인 중")
             
             # 이벤트 설명 한국어 번역
-            description_ko = translate_event_description(r.desc or "", r.stage)
+            description_ko = translate_event_description(desc or "", stage)
             
             # 상대 시간 계산
-            now = datetime.now(timezone.utc)
-            if r.ts.tzinfo is None:
-                event_time = r.ts.replace(tzinfo=timezone.utc)
+            if event_time and isinstance(event_time, datetime):
+                now = datetime.now(timezone.utc)
+                if event_time.tzinfo is None:
+                    event_time = event_time.replace(tzinfo=timezone.utc)
+                else:
+                    event_time = event_time.astimezone(timezone.utc)
+                
+                diff = now - event_time
+                
+                if diff.total_seconds() < 60:
+                    time_ago = "방금 전"
+                elif diff.total_seconds() < 3600:
+                    minutes = int(diff.total_seconds() / 60)
+                    time_ago = f"{minutes}분 전"
+                elif diff.total_seconds() < 86400:
+                    hours = int(diff.total_seconds() / 3600)
+                    time_ago = f"{hours}시간 전"
+                elif diff.days < 7:
+                    days = diff.days
+                    time_ago = f"{days}일 전"
+                else:
+                    time_ago = event_time.strftime("%Y-%m-%d")
             else:
-                event_time = r.ts
-            diff = now - event_time
-            
-            if diff.total_seconds() < 60:
-                time_ago = "방금 전"
-            elif diff.total_seconds() < 3600:
-                minutes = int(diff.total_seconds() / 60)
-                time_ago = f"{minutes}분 전"
-            elif diff.total_seconds() < 86400:
-                hours = int(diff.total_seconds() / 3600)
-                time_ago = f"{hours}시간 전"
-            elif diff.days < 7:
-                days = diff.days
-                time_ago = f"{days}일 전"
-            else:
-                time_ago = event_time.strftime("%Y-%m-%d")
+                time_ago = "알 수 없음"
+                event_time = datetime.now(timezone.utc)
             
             result.append({
-                "id": r.id,
-                "tracking_number": r.tracking_number,
-                "title": f"{status_ko} - #{r.tracking_number[-8:]}",
+                "id": f"{num}_{hash(str(event_time))}",  # 고유 ID 생성
+                "tracking_number": num,
+                "title": f"{status_ko} - #{num[-8:]}",
                 "description": description_ko,
                 "time": time_ago,
-                "time_iso": r.ts.isoformat() if hasattr(r.ts, "isoformat") else str(r.ts),
-                "stage": r.stage,
+                "time_iso": event_time.isoformat() if hasattr(event_time, "isoformat") else str(event_time),
+                "stage": stage,
                 "status": status_ko,
-                "source": r.source or "unknown"
+                "source": "17TRACK"
             })
-        
-        return result
+    
+    # 시간순으로 정렬 (최신순) 및 limit 적용
+    result.sort(key=lambda x: x.get("time_iso", ""), reverse=True)
+    print(f"[recent-events] 최종 결과: {len(result)}개 이벤트 반환")
+    return result[:limit]
 
 
 @app.get("/admin/shipments/{number}/events")

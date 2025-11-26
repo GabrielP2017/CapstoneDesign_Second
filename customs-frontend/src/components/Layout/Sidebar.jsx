@@ -21,8 +21,13 @@ import {
   Zap,
   X as XIcon,
 } from "lucide-react";
-import { getSearchHistory, removeSearchHistory, getStatusColorClass } from "../../lib/searchHistory";
+import {
+  getSearchHistory,
+  removeSearchHistory,
+  getStatusColorClass,
+} from "../../lib/searchHistory";
 import { getRecentEvents } from "../../lib/api";
+import { getPresets } from "../../lib/presets";
 
 // 3x3 카테고리 정의
 const categories = [
@@ -100,7 +105,13 @@ menuItems.forEach((item) => {
   }
 });
 
-function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHistoryClick }) {
+function Sidebar({
+  collapsed,
+  currentPage,
+  onPageChange,
+  onToggle,
+  onSearchHistoryClick,
+}) {
   const [expandedItemId, setExpandedItemId] = useState(null);
   const [openPopup, setOpenPopup] = useState(null);
   const sidebarRef = useRef(null);
@@ -144,22 +155,25 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
 
     // storage 이벤트 리스너 추가 (다른 탭에서 변경 시 동기화)
     const handleStorageChange = (e) => {
-      if (e.key === 'tracking_search_history') {
+      if (e.key === "tracking_search_history") {
         loadHistory();
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    
+    window.addEventListener("storage", handleStorageChange);
+
     // 커스텀 이벤트 리스너 추가 (같은 탭에서 변경 시)
     const handleCustomStorageChange = () => {
       loadHistory();
     };
-    window.addEventListener('searchHistoryUpdated', handleCustomStorageChange);
+    window.addEventListener("searchHistoryUpdated", handleCustomStorageChange);
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('searchHistoryUpdated', handleCustomStorageChange);
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener(
+        "searchHistoryUpdated",
+        handleCustomStorageChange
+      );
     };
   }, []);
 
@@ -167,11 +181,34 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
   useEffect(() => {
     const fetchActivityFeed = async (signal) => {
       try {
-        const data = await getRecentEvents(5, signal); // 사이드바에는 최근 5개만 표시
+        // 즐겨찾는 운송장 번호 목록 가져오기
+        const presets = getPresets();
+        const favoriteNumbers = new Set();
+
+        // 모든 프리셋에서 운송장 번호 추출
+        presets.forEach((preset) => {
+          if (Array.isArray(preset.trackingNumbers)) {
+            preset.trackingNumbers.forEach((num) => {
+              if (num && num.trim()) {
+                favoriteNumbers.add(num.trim());
+              }
+            });
+          }
+        });
+
+        // 즐겨찾는 운송장이 없으면 빈 배열 반환
+        if (favoriteNumbers.size === 0) {
+          setRecentEvents([]);
+          return;
+        }
+
+        // 백엔드에 즐겨찾는 운송장 번호 목록 전달
+        const favoriteNumbersArray = Array.from(favoriteNumbers);
+        const data = await getRecentEvents(5, favoriteNumbersArray, signal); // 사이드바에는 최근 5개만 표시
         setRecentEvents(data);
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          console.error('활동 피드 데이터 가져오기 실패:', err);
+        if (err.name !== "AbortError") {
+          console.error("활동 피드 데이터 가져오기 실패:", err);
         }
       }
     };
@@ -199,14 +236,14 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
   // 상태별 색상 매핑
   const getEventColor = (stage) => {
     switch (stage) {
-      case 'CLEARED':
-        return 'bg-green-500';
-      case 'IN_PROGRESS':
-        return 'bg-blue-500';
-      case 'DELAY':
-        return 'bg-amber-500';
+      case "CLEARED":
+        return "bg-green-500";
+      case "IN_PROGRESS":
+        return "bg-blue-500";
+      case "DELAY":
+        return "bg-amber-500";
       default:
-        return 'bg-slate-500';
+        return "bg-slate-500";
     }
   };
 
@@ -216,7 +253,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
       onSearchHistoryClick(trackingNumber);
     } else if (onPageChange) {
       // 폴백: 통관 페이지로 이동
-      onPageChange('customs');
+      onPageChange("customs");
     }
   };
 
@@ -226,7 +263,7 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
     removeSearchHistory(trackingNumber);
     setSearchHistory(getSearchHistory());
     // 커스텀 이벤트 발생시켜 다른 컴포넌트에 알림
-    window.dispatchEvent(new Event('searchHistoryUpdated'));
+    window.dispatchEvent(new Event("searchHistoryUpdated"));
   };
 
   return (
@@ -365,7 +402,9 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                             {item.statusLabel}
                           </span>
                           <button
-                            onClick={(e) => handleRemoveHistory(e, item.trackingNumber)}
+                            onClick={(e) =>
+                              handleRemoveHistory(e, item.trackingNumber)
+                            }
                             className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-200 dark:hover:bg-slate-600 rounded"
                             aria-label="삭제"
                           >
@@ -401,13 +440,19 @@ function Sidebar({ collapsed, currentPage, onPageChange, onToggle, onSearchHisto
                         }}
                         className="flex items-start space-x-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-lg p-1.5 -m-1.5 transition-colors"
                       >
-                        <div className={`w-2 h-2 rounded-full ${getEventColor(event.stage)} mt-1.5 flex-shrink-0`}></div>
+                        <div
+                          className={`w-2 h-2 rounded-full ${getEventColor(
+                            event.stage
+                          )} mt-1.5 flex-shrink-0`}
+                        ></div>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
                             {event.description || event.title}
                           </p>
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-xs text-slate-500">{event.time}</span>
+                            <span className="text-xs text-slate-500">
+                              {event.time}
+                            </span>
                             {event.tracking_number && (
                               <span className="text-xs font-mono text-blue-600 dark:text-blue-400 ml-2 truncate">
                                 {event.tracking_number}

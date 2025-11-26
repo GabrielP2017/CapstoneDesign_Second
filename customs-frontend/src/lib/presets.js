@@ -1,6 +1,6 @@
 // 운송장 번호 프리셋 관리 유틸리티
 
-const STORAGE_KEY = 'tracking_presets';
+const STORAGE_KEY = "tracking_presets";
 const MAX_PRESETS = 20; // 최대 프리셋 개수
 
 /**
@@ -14,6 +14,28 @@ const MAX_PRESETS = 20; // 최대 프리셋 개수
  */
 
 /**
+ * 기본 프리셋 생성
+ * @returns {Preset[]}
+ */
+function getDefaultPresets() {
+  const now = new Date().toISOString();
+  const defaultTrackingNumbers = [
+    "502764620611",
+    "502780940050",
+    "LP147299466HK",
+    "502728309861",
+  ];
+
+  return defaultTrackingNumbers.map((trackingNumber, index) => ({
+    id: `default_preset_${index}`,
+    name: trackingNumber,
+    trackingNumbers: [trackingNumber],
+    createdAt: now,
+    updatedAt: now,
+  }));
+}
+
+/**
  * localStorage에서 프리셋 목록 불러오기
  * @returns {Preset[]}
  */
@@ -21,12 +43,15 @@ export function getPresets() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) {
-      return [];
+      // 기본 프리셋 초기화
+      const defaultPresets = getDefaultPresets();
+      savePresets(defaultPresets);
+      return defaultPresets;
     }
     const parsed = JSON.parse(stored);
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
-    console.warn('프리셋 불러오기 실패:', error);
+    console.warn("프리셋 불러오기 실패:", error);
     return [];
   }
 }
@@ -39,9 +64,9 @@ function savePresets(presets) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
     // 커스텀 이벤트 발생시켜 다른 컴포넌트에 알림
-    window.dispatchEvent(new Event('presetsUpdated'));
+    window.dispatchEvent(new Event("presetsUpdated"));
   } catch (error) {
-    console.warn('프리셋 저장 실패:', error);
+    console.warn("프리셋 저장 실패:", error);
     throw error;
   }
 }
@@ -54,24 +79,24 @@ function savePresets(presets) {
  */
 export function addPreset(name, trackingNumbers) {
   if (!name || !name.trim()) {
-    throw new Error('프리셋 이름을 입력하세요.');
+    throw new Error("프리셋 이름을 입력하세요.");
   }
-  
+
   if (!Array.isArray(trackingNumbers) || trackingNumbers.length === 0) {
-    throw new Error('운송장 번호를 최소 1개 이상 입력하세요.');
+    throw new Error("운송장 번호를 최소 1개 이상 입력하세요.");
   }
 
   // 빈 번호 제거 및 정리
   const cleanedNumbers = trackingNumbers
-    .map(num => num.trim())
-    .filter(num => num.length > 0);
+    .map((num) => num.trim())
+    .filter((num) => num.length > 0);
 
   if (cleanedNumbers.length === 0) {
-    throw new Error('유효한 운송장 번호를 입력하세요.');
+    throw new Error("유효한 운송장 번호를 입력하세요.");
   }
 
   const presets = getPresets();
-  
+
   if (presets.length >= MAX_PRESETS) {
     throw new Error(`최대 ${MAX_PRESETS}개의 프리셋만 저장할 수 있습니다.`);
   }
@@ -87,7 +112,7 @@ export function addPreset(name, trackingNumbers) {
 
   const updated = [...presets, newPreset];
   savePresets(updated);
-  
+
   return newPreset;
 }
 
@@ -99,10 +124,10 @@ export function addPreset(name, trackingNumbers) {
  */
 export function updatePreset(id, updates) {
   const presets = getPresets();
-  const index = presets.findIndex(p => p.id === id);
-  
+  const index = presets.findIndex((p) => p.id === id);
+
   if (index === -1) {
-    throw new Error('프리셋을 찾을 수 없습니다.');
+    throw new Error("프리셋을 찾을 수 없습니다.");
   }
 
   const preset = presets[index];
@@ -115,22 +140,25 @@ export function updatePreset(id, updates) {
   // 이름 검증
   if (updates.name !== undefined) {
     if (!updates.name || !updates.name.trim()) {
-      throw new Error('프리셋 이름을 입력하세요.');
+      throw new Error("프리셋 이름을 입력하세요.");
     }
     updatedPreset.name = updates.name.trim();
   }
 
   // 운송장 번호 검증 및 정리
   if (updates.trackingNumbers !== undefined) {
-    if (!Array.isArray(updates.trackingNumbers) || updates.trackingNumbers.length === 0) {
-      throw new Error('운송장 번호를 최소 1개 이상 입력하세요.');
+    if (
+      !Array.isArray(updates.trackingNumbers) ||
+      updates.trackingNumbers.length === 0
+    ) {
+      throw new Error("운송장 번호를 최소 1개 이상 입력하세요.");
     }
     const cleanedNumbers = updates.trackingNumbers
-      .map(num => num.trim())
-      .filter(num => num.length > 0);
-    
+      .map((num) => num.trim())
+      .filter((num) => num.length > 0);
+
     if (cleanedNumbers.length === 0) {
-      throw new Error('유효한 운송장 번호를 입력하세요.');
+      throw new Error("유효한 운송장 번호를 입력하세요.");
     }
     updatedPreset.trackingNumbers = cleanedNumbers;
   }
@@ -138,7 +166,7 @@ export function updatePreset(id, updates) {
   const updated = [...presets];
   updated[index] = updatedPreset;
   savePresets(updated);
-  
+
   return updatedPreset;
 }
 
@@ -148,10 +176,10 @@ export function updatePreset(id, updates) {
  */
 export function deletePreset(id) {
   const presets = getPresets();
-  const filtered = presets.filter(p => p.id !== id);
-  
+  const filtered = presets.filter((p) => p.id !== id);
+
   if (filtered.length === presets.length) {
-    throw new Error('프리셋을 찾을 수 없습니다.');
+    throw new Error("프리셋을 찾을 수 없습니다.");
   }
 
   savePresets(filtered);
@@ -164,7 +192,7 @@ export function deletePreset(id) {
  */
 export function getPresetById(id) {
   const presets = getPresets();
-  return presets.find(p => p.id === id) || null;
+  return presets.find((p) => p.id === id) || null;
 }
 
 /**
@@ -173,9 +201,8 @@ export function getPresetById(id) {
 export function clearAllPresets() {
   try {
     localStorage.removeItem(STORAGE_KEY);
-    window.dispatchEvent(new Event('presetsUpdated'));
+    window.dispatchEvent(new Event("presetsUpdated"));
   } catch (error) {
-    console.warn('프리셋 전체 삭제 실패:', error);
+    console.warn("프리셋 전체 삭제 실패:", error);
   }
 }
-

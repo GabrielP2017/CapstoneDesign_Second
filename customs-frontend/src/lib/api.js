@@ -1,5 +1,7 @@
 ﻿const defaultBase = "http://localhost:8000";
-export const API_BASE_URL = (import.meta.env?.VITE_API_BASE_URL || defaultBase).replace(/\/$/, "");
+export const API_BASE_URL = (
+  import.meta.env?.VITE_API_BASE_URL || defaultBase
+).replace(/\/$/, "");
 
 async function http(path, { method = "GET", body, headers, signal } = {}) {
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
@@ -25,7 +27,10 @@ async function http(path, { method = "GET", body, headers, signal } = {}) {
     if (contentType.includes("application/json")) {
       try {
         const errorPayload = await res.json();
-        detail = errorPayload.detail || errorPayload.message || JSON.stringify(errorPayload);
+        detail =
+          errorPayload.detail ||
+          errorPayload.message ||
+          JSON.stringify(errorPayload);
       } catch (error) {
         detail = res.statusText;
       }
@@ -99,8 +104,7 @@ export async function adminListTrackings(signal) {
     const number =
       r.number || r.tracking_number || r.trackingNumber || r.no || r.id || "";
 
-    const status =
-      r.status || r.last_status || r.summary?.status || "UNKNOWN";
+    const status = r.status || r.last_status || r.summary?.status || "UNKNOWN";
 
     const last_event_text =
       r.last_event ||
@@ -143,11 +147,15 @@ export async function adminListTrackings(signal) {
 }
 
 export function adminGetShipmentEvents(number, signal) {
-  return http(`/admin/shipments/${encodeURIComponent(number)}/events`, { signal });
+  return http(`/admin/shipments/${encodeURIComponent(number)}/events`, {
+    signal,
+  });
 }
 
 export function adminGetShipmentDetails(number, signal) {
-  return http(`/admin/shipments/${encodeURIComponent(number)}/details`, { signal });
+  return http(`/admin/shipments/${encodeURIComponent(number)}/details`, {
+    signal,
+  });
 }
 
 export function adminSaveShipmentDetails(number, payload) {
@@ -159,9 +167,16 @@ export function adminSaveShipmentDetails(number, payload) {
 
 // ========== 실시간 이벤트 / BE4 ==========
 
-export function getRecentEvents(limit = 20, signal) {
-  const query = new URLSearchParams({ limit: String(limit) }).toString();
-  return http(`/api/recent-events?${query}`, { signal });
+export function getRecentEvents(limit = 20, trackingNumbers = null, signal) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (
+    trackingNumbers &&
+    Array.isArray(trackingNumbers) &&
+    trackingNumbers.length > 0
+  ) {
+    query.set("tracking_numbers", trackingNumbers.join(","));
+  }
+  return http(`/api/recent-events?${query.toString()}`, { signal });
 }
 
 export function getRuleLibrary(signal) {
