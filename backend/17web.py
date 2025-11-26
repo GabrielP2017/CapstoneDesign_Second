@@ -514,11 +514,22 @@ def summarize_customs(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     cleared = imp_cl or any_cl
 
     # 지연은 import 관련만 집계(원래 의도 유지)
-    delays = [
-        dict(at=e["ts"].isoformat(), hint=(e["desc"] or "")[:140])
-        for e in events
-        if e["stage"] == "DELAY" and _has(e, "import")
-    ]
+    # 단, 통관/배송이 완료된 경우(CLEARED) 이후의 지연은 제외
+    delays = []
+    for e in events:
+        if e["stage"] == "DELAY" and _has(e, "import"):
+            # CLEARED 이벤트가 있고, 그 이벤트가 이 지연보다 나중에 발생했다면 제외
+            should_include = True
+            if cleared:
+                # cleared는 datetime 객체
+                cleared_dt = cleared
+                delay_dt = e["ts"]
+                # 완료가 지연보다 나중에 발생했다면 지연 제외 (지연이 해결된 것으로 간주)
+                if cleared_dt > delay_dt:
+                    should_include = False
+            
+            if should_include:
+                delays.append(dict(at=e["ts"].isoformat() if hasattr(e["ts"], "isoformat") else str(e["ts"]), hint=(e["desc"] or "")[:140]))
 
     # 누락 보정: 완료만 있고 진행이 없으면 직전 이벤트를 진행으로 간주
     if cleared and not first_in and events:
