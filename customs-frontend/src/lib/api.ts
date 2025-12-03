@@ -1,6 +1,6 @@
 ﻿// src/lib/api.ts
 const defaultBase = 'http://localhost:8000';
-const API_BASE_URL = (((import.meta as any)?.env?.VITE_API_BASE_URL) || defaultBase).replace(/\/$/, '');
+export const API_BASE_URL = (((import.meta as any)?.env?.VITE_API_BASE_URL) || defaultBase).replace(/\/$/, '');
 
 async function http(path: string, { method = 'GET', body, headers, signal }: any = {}) {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;

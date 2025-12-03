@@ -14,9 +14,10 @@ import {
 } from "lucide-react";
 import { saveSearchHistory } from "../../lib/searchHistory";
 import PresetsModal from "../Favorites/PresetsModal";
+import { API_BASE_URL } from "../../lib/api";
 
 // API 함수들
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const API_BASE = API_BASE_URL;
 
 const getHealth = async () => {
   const res = await fetch(`${API_BASE}/health`);

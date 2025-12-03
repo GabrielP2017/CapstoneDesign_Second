@@ -55,12 +55,17 @@ import pandas as pd
 import numpy as np
 from be4_module import register_be4
 
+# 환경 변수 로드
+load_dotenv()
+
 app = FastAPI(title="17TRACK Customs Filter Enhanced")
 register_be4(app)
 
+# CORS 설정: 환경 변수에서 프론트엔드 도메인 가져오기
+# 여러 도메인은 쉼표로 구분 (예: "http://localhost:5173,http://54.116.8.74,http://54.116.8.74:80")
 FRONTEND_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173").split(",")
+    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://54.116.8.74,http://54.116.8.74:80,http://54.116.8.74:443").split(",")
     if origin.strip()
 ]
 
