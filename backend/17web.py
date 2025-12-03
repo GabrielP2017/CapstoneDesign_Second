@@ -63,9 +63,11 @@ register_be4(app)
 
 # CORS 설정: 환경 변수에서 프론트엔드 도메인 가져오기
 # 여러 도메인은 쉼표로 구분 (예: "http://localhost:5173,https://cargomon.kr")
+# 프로덕션에서는 HTTPS만 허용 (보안 강화)
+_default_origins = "http://localhost:5173,http://localhost:3000,https://cargomon.kr,https://www.cargomon.kr"
 FRONTEND_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://localhost:3000,https://cargomon.kr,http://cargomon.kr").split(",")
+    for origin in os.getenv("FRONTEND_ORIGINS", _default_origins).split(",")
     if origin.strip()
 ]
 
@@ -74,7 +76,29 @@ app.add_middleware(
     allow_origins=FRONTEND_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,  # HTTPS 사용 시 쿠키/인증 정보 전송 허용
 )
+
+# HTTPS 강제 미들웨어 (프로덕션 환경)
+# nginx에서 이미 처리하지만, 추가 보안을 위해 백엔드에서도 확인
+@app.middleware("http")
+async def force_https(request: Request, call_next):
+    # 프로덕션 환경에서만 HTTPS 강제
+    # X-Forwarded-Proto 헤더 확인 (nginx 리버스 프록시 사용 시)
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
+    # 리버스 프록시 뒤에 있고 HTTP로 접근한 경우 HTTPS로 리다이렉트
+    if forwarded_proto and forwarded_proto != "https":
+        from fastapi.responses import RedirectResponse
+        url = str(request.url)
+        url = url.replace("http://", "https://", 1)
+        return RedirectResponse(url=url, status_code=301)
+    response = await call_next(request)
+    # 보안 헤더 추가
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 # [ANCHOR: HTTP_CLIENT] 전역 HTTP 클라이언트 풀 (연결 재사용)
 HTTP_CLIENT: Optional[httpx.AsyncClient] = None
