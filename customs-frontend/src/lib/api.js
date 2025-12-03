@@ -1,10 +1,21 @@
 ﻿// 개발 환경: localhost, 프로덕션: 상대 경로 /api 사용 (nginx 리다이렉트)
-const defaultBase = import.meta.env?.MODE === "production" 
-  ? "/api" 
-  : "http://localhost:8000";
-export const API_BASE_URL = (
-  import.meta.env?.VITE_API_BASE_URL || defaultBase
-).replace(/\/$/, "");
+// 프로덕션에서는 현재 페이지의 프로토콜(HTTPS)을 따라가도록 상대 경로 사용
+function getApiBaseUrl() {
+  // 환경 변수가 명시적으로 설정된 경우 사용
+  if (import.meta.env?.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "");
+  }
+  
+  // 프로덕션 모드: 상대 경로 사용 (현재 페이지의 프로토콜 따라감)
+  if (import.meta.env?.MODE === "production") {
+    return "/api";
+  }
+  
+  // 개발 모드: localhost 사용
+  return "http://localhost:8000";
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 async function http(path, { method = "GET", body, headers, signal } = {}) {
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
