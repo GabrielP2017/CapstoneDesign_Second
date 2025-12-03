@@ -1,6 +1,21 @@
 ﻿// src/lib/api.ts
-const defaultBase = 'http://localhost:8000';
-export const API_BASE_URL = (((import.meta as any)?.env?.VITE_API_BASE_URL) || defaultBase).replace(/\/$/, '');
+// 개발 환경: localhost, 프로덕션: 상대 경로 사용 (현재 프로토콜 따라감)
+function getApiBaseUrl() {
+  // 환경 변수가 명시적으로 설정된 경우 사용
+  if ((import.meta as any)?.env?.VITE_API_BASE_URL) {
+    return ((import.meta as any).env.VITE_API_BASE_URL as string).replace(/\/$/, '');
+  }
+  
+  // 프로덕션 모드: 항상 상대 경로 사용 (HTTPS 페이지에서는 자동으로 HTTPS로 요청)
+  if ((import.meta as any)?.env?.MODE === 'production') {
+    return '/api';
+  }
+  
+  // 개발 모드: localhost 사용
+  return 'http://localhost:8000';
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 async function http(path: string, { method = 'GET', body, headers, signal }: any = {}) {
   const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;

@@ -1,21 +1,14 @@
-﻿// 개발 환경: localhost, 프로덕션: HTTPS 강제 사용
-// 프로덕션에서는 명시적으로 HTTPS를 사용하여 보안 연결 보장
+﻿// 개발 환경: localhost, 프로덕션: 상대 경로 사용 (현재 프로토콜 따라감)
+// 프로덕션에서는 상대 경로를 사용하여 Mixed Content 문제 방지
 function getApiBaseUrl() {
   // 환경 변수가 명시적으로 설정된 경우 사용
   if (import.meta.env?.VITE_API_BASE_URL) {
     return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "");
   }
   
-  // 프로덕션 모드: HTTPS 강제 사용
+  // 프로덕션 모드: 항상 상대 경로 사용 (HTTPS 페이지에서는 자동으로 HTTPS로 요청)
   if (import.meta.env?.MODE === "production") {
-    // 현재 페이지가 HTTPS인지 확인
-    if (typeof window !== "undefined" && window.location.protocol === "https:") {
-      // HTTPS 페이지에서는 상대 경로 사용 (현재 프로토콜 따라감)
-      return "/api";
-    } else {
-      // HTTP 페이지에서도 HTTPS로 강제 리다이렉트
-      return "https://cargomon.kr/api";
-    }
+    return "/api";
   }
   
   // 개발 모드: localhost 사용
