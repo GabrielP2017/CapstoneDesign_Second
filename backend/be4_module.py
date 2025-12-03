@@ -480,7 +480,35 @@ class RegulationNoticeService:
         cache = _load_json(self.cache_path, [])
         for entry in cache:
             try:
-                entry["published_at"] = self._parse_flexible_date(entry["published_at"])
+                # 캐시에서 로드할 때는 이미 ISO 형식이므로 직접 파싱 시도
+                published_at_value = entry.get("published_at")
+                if isinstance(published_at_value, str):
+                    # ISO 형식 문자열을 직접 파싱 (다양한 변형 지원)
+                    dt = None
+                    try:
+                        # 표준 ISO 형식: 2025-10-27T22:10:00+00:00 또는 2025-10-27T22:10:00Z
+                        normalized = published_at_value.replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(normalized)
+                    except Exception:
+                        try:
+                            # dateutil.parser 사용 (더 유연한 파싱)
+                            from dateutil import parser as dtp
+                            dt = dtp.parse(published_at_value)
+                        except Exception:
+                            # 마지막으로 기존 파싱 함수 사용
+                            dt = self._parse_flexible_date(published_at_value, use_default=True)
+                    
+                    if dt:
+                        entry["published_at"] = dt
+                    else:
+                        # 파싱 실패 시에도 항목은 유지하되, 현재 시간 사용 (로그는 나중에 추가 가능)
+                        entry["published_at"] = datetime.now(timezone.utc)
+                elif isinstance(published_at_value, datetime):
+                    entry["published_at"] = published_at_value
+                else:
+                    # 날짜가 없으면 현재 시간 사용 (항목은 유지)
+                    entry["published_at"] = datetime.now(timezone.utc)
+                
                 source_meta = next((s for s in NOTICE_SOURCES if s.get("id") == entry.get("source")), None)
                 if source_meta:
                     entry_url = _ensure_bbs_id(entry.get("url", ""), source_meta)
@@ -495,7 +523,9 @@ class RegulationNoticeService:
                         "summary": notice.summary,
                         "official_url": notice.official_url,
                     }
-            except Exception:
+            except Exception as e:
+                # 예외 발생 시에도 항목을 건너뛰지 않고 로그만 남기기 (선택사항)
+                # print(f"Warning: Failed to load notice entry: {e}")
                 continue
         now = datetime.now(timezone.utc)
         if self._has_real_notices():
@@ -604,7 +634,14 @@ class RegulationNoticeService:
             
             # Date parsing (try pubDate, dc:date, etc.)
             pub_date_raw = get_text(item, "pubDate") or get_text(item, "dc:date") or get_text(item, "date") or ""
-            published_at = self._parse_flexible_date(pub_date_raw)
+            if not pub_date_raw or not pub_date_raw.strip():
+                # 날짜가 없으면 현재 시간 사용 (항목은 유지)
+                published_at = datetime.now(timezone.utc)
+            else:
+                # 날짜 파싱 시도 (실패해도 기본값 사용)
+                published_at = self._parse_flexible_date(pub_date_raw, use_default=True)
+                if published_at is None:
+                    published_at = datetime.now(timezone.utc)
 
             # Unique ID
             notice_id = hashlib.sha1(f"{source['id']}-{title}-{link}".encode("utf-8")).hexdigest()
@@ -661,9 +698,17 @@ class RegulationNoticeService:
         )
         return notices[:limit]
 
-    def _parse_flexible_date(self, value: str) -> datetime:
+    def _parse_flexible_date(self, value: str, use_default: bool = True) -> Optional[datetime]:
         """
         Attempts to parse various date formats used by KCS and Korean gov RSS.
+        Uses dateutil.parser as fallback for maximum compatibility.
+        
+        Args:
+            value: Date string or datetime object to parse
+            use_default: If True, returns current time when parsing fails. If False, returns None.
+        
+        Returns:
+            Parsed datetime object in UTC, or None if parsing fails and use_default=False
         """
         if isinstance(value, datetime):
             dt = value
@@ -673,39 +718,77 @@ class RegulationNoticeService:
                 raw = value.strip()
             elif value is not None:
                 raw = str(value).strip()
+            
+            if not raw:
+                if use_default:
+                    return datetime.now(timezone.utc)
+                return None
+            
+            # 정규화: 다양한 시간대 표기 통일
             normalized = raw.replace("GMT+0900", "+0900").replace("GMT+09:00", "+0900")
             if normalized.endswith("KST"):
                 normalized = normalized[:-3].strip()
                 if normalized:
                     normalized = f"{normalized} +0900"
+            
             dt = None
+            
+            # 1. ISO 형식 시도
             if normalized:
                 try:
-                    dt = datetime.fromisoformat(normalized)
+                    # Z를 +00:00로 변환
+                    iso_str = normalized.replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(iso_str)
                 except Exception:
-                    patterns = [
-                        "%a, %d %b %Y %H:%M:%S %z",
-                        "%a, %d %b %Y %H:%M:%S %Z",
-                        "%Y-%m-%d %H:%M:%S",
-                        "%Y-%m-%d %H:%M",
-                        "%Y-%m-%d",
-                        "%Y.%m.%d %H:%M:%S",
-                        "%Y.%m.%d %H:%M",
-                        "%Y.%m.%d",
-                        "%Y/%m/%d %H:%M:%S",
-                        "%Y/%m/%d",
-                    ]
-                    for pattern in patterns:
-                        try:
-                            dt = datetime.strptime(normalized, pattern)
-                            break
-                        except Exception:
-                            continue
+                    pass
+            
+            # 2. 표준 패턴 시도
+            if dt is None and normalized:
+                patterns = [
+                    "%a, %d %b %Y %H:%M:%S %z",      # RFC 822 with timezone
+                    "%a, %d %b %Y %H:%M:%S %Z",      # RFC 822 with timezone name
+                    "%a, %d %b %Y %H:%M:%S",         # RFC 822 without timezone
+                    "%d %b %Y %H:%M:%S %z",          # Without weekday
+                    "%d %b %Y %H:%M:%S",
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%Y-%m-%d",
+                    "%Y.%m.%d %H:%M:%S",
+                    "%Y.%m.%d %H:%M",
+                    "%Y.%m.%d",
+                    "%Y/%m/%d %H:%M:%S",
+                    "%Y/%m/%d",
+                    "%d-%m-%Y %H:%M:%S",
+                    "%d/%m/%Y %H:%M:%S",
+                ]
+                for pattern in patterns:
+                    try:
+                        dt = datetime.strptime(normalized, pattern)
+                        break
+                    except Exception:
+                        continue
+            
+            # 3. dateutil.parser 사용 (가장 유연한 파싱)
             if dt is None:
-                dt = datetime.now(timezone.utc)
+                try:
+                    from dateutil import parser as dtp
+                    dt = dtp.parse(raw)
+                except Exception:
+                    pass
+            
+            # 4. 기본값 사용 또는 None 반환
+            if dt is None:
+                if use_default:
+                    dt = datetime.now(timezone.utc)
+                else:
+                    return None
+        
+        # 시간대 처리
         if dt.tzinfo is None:
+            # 시간대가 없으면 KST로 가정 (한국 정부 사이트이므로)
             kst = timezone(timedelta(hours=9))
             dt = dt.replace(tzinfo=kst)
+        
         return dt.astimezone(timezone.utc)
 
     def get_fallback_detail(self, notice_id: str) -> Optional[Dict[str, object]]:
