@@ -1,17 +1,25 @@
 ﻿// src/lib/api.ts
 // 개발 환경: localhost, 프로덕션: 상대 경로 사용 (현재 프로토콜 따라감)
 function getApiBaseUrl() {
-  // 환경 변수가 명시적으로 설정된 경우 사용
-  if ((import.meta as any)?.env?.VITE_API_BASE_URL) {
-    return ((import.meta as any).env.VITE_API_BASE_URL as string).replace(/\/$/, '');
-  }
+  const isProduction = (import.meta as any)?.env?.MODE === 'production';
+  const envApiUrl = (import.meta as any)?.env?.VITE_API_BASE_URL;
   
   // 프로덕션 모드: 항상 상대 경로 사용 (HTTPS 페이지에서는 자동으로 HTTPS로 요청)
-  if ((import.meta as any)?.env?.MODE === 'production') {
+  // 환경 변수가 절대 URL(http:// 또는 https://로 시작)인 경우 무시하고 상대 경로 사용
+  if (isProduction) {
+    // 프로덕션에서는 절대 URL을 사용하지 않음 (Mixed Content 및 SSL 오류 방지)
+    if (envApiUrl && !/^https?:\/\//i.test(envApiUrl)) {
+      // 상대 경로인 경우에만 사용
+      return String(envApiUrl).replace(/\/$/, '');
+    }
     return '/api';
   }
   
-  // 개발 모드: localhost 사용
+  // 개발 모드: 환경 변수가 있으면 사용, 없으면 localhost
+  if (envApiUrl) {
+    return String(envApiUrl).replace(/\/$/, '');
+  }
+  
   return 'http://localhost:8000';
 }
 
