@@ -65,7 +65,7 @@ register_be4(app)
 # 여러 도메인은 쉼표로 구분 (예: "http://localhost:5173,http://54.116.8.74,http://54.116.8.74:80")
 FRONTEND_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://54.116.8.74,http://54.116.8.74:80,http://54.116.8.74:443").split(",")
+    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://localhost:3000,http://54.116.8.74,http://54.116.8.74:80,http://54.116.8.74:443,http://54.116.8.74:3000").split(",")
     if origin.strip()
 ]
 
