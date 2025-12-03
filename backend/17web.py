@@ -166,7 +166,7 @@ async def _startup():
     try:
         HTTP_CLIENT = httpx.AsyncClient(timeout=20.0, http2=True)
     except ImportError:
-        print("\u26a0\ufe0f httpx[http2] 미설치. HTTP/1.1로 폴백합니다.")
+        print("httpx[http2] 미설치. HTTP/1.1로 폴백합니다.")
         HTTP_CLIENT = httpx.AsyncClient(timeout=20.0, http2=False)
 
 @app.on_event("shutdown")
@@ -183,7 +183,7 @@ API_KEY  = os.getenv("SEVENTEENTRACK_API_KEY") # 대시보드의 Tracking API Ke
 USER_AGENT = os.getenv("SEVENTEENTRACK_UA", "customs-filter-demo/1.0")
 
 if not API_KEY:
-    print("\u26a0\ufe0f  SEVENTEENTRACK_API_KEY 미설정. .env 또는 환경변수로 넣어주세요.")
+    print("SEVENTEENTRACK_API_KEY 미설정. .env 또는 환경변수로 넣어주세요.")
 
 # 웹훅 공식 이벤트(v1 문서): TRACKING_UPDATED, TRACKING_STOPPED
 VALID_EVENTS = {"TRACKING_UPDATED", "TRACKING_STOPPED"}
@@ -1107,7 +1107,7 @@ async def debug_normalize(number: str):
             if prov_country == "CN":
                 origin_country = "중국"
                 origin_source = "provider.country"
-                print(f"[API] ✅ Found origin from provider.country: CN → 중국")
+                print(f"[API] Found origin from provider.country: CN → 중국")
             elif prov_country == "KR":
                 origin_country = "대한민국"
                 origin_source = "provider.country"
@@ -1118,7 +1118,7 @@ async def debug_normalize(number: str):
                 if any(cn in prov_name for cn in ["aliexpress", "cainiao", "yanwen", "yunexpress", "china"]):
                     origin_country = "중국"
                     origin_source = "provider.name"
-                    print(f"[API] ✅ Found origin from provider.name: {provider_info.get('name')} → 중국")
+                    print(f"[API] Found origin from provider.name: {provider_info.get('name')} → 중국")
             
             # 3. 첫 이벤트의 타임존으로 추론
             if not origin_country:
@@ -1131,7 +1131,7 @@ async def debug_normalize(number: str):
                         if any(kw in desc for kw in ["shipped", "export", "departure"]):
                             origin_country = "중국"
                             origin_source = "timezone"
-                            print(f"[API] ✅ Found origin from timezone: +08:00 → 중국")
+                            print(f"[API] Found origin from timezone: +08:00 → 중국")
                             break
 
     # 정규화 및 요약
@@ -1149,7 +1149,7 @@ async def debug_normalize(number: str):
     if origin_country and (not details.get("origin_country")):
         details["origin_country"] = origin_country
         details["origin_country_source"] = f"OVERRIDE:{origin_source}"
-        print(f"[API] 🔧 Override applied: {origin_country}")
+        print(f"[API] Override applied: {origin_country}")
 
     raw_provider_events = _extract_raw_provider_events_min(track or {})
 
@@ -2082,9 +2082,9 @@ async def predict_delivery(req: DeliveryPredictionRequest):
 # =========================
 async def main():
     tracking_numbers = ["TRACKING_NUMBER_1", "INVALID_NUMBER_2", "TRACKING_NUMBER_3"]
-    print("\ud83d\ude80 register_trackings:", await register_trackings(tracking_numbers))
-    print("\u26a1 push_now:", await push_now(tracking_numbers[:2]))
-    print("🔎 get_trackinfo:", await get_trackinfo(tracking_numbers[:2]))
+    print("register_trackings:", await register_trackings(tracking_numbers))
+    print("push_now:", await push_now(tracking_numbers[:2]))
+    print("get_trackinfo:", await get_trackinfo(tracking_numbers[:2]))
 
 if __name__ == "__main__":
     asyncio.run(main())
