@@ -1,4 +1,7 @@
-﻿const defaultBase = "http://localhost:8000";
+﻿// 개발 환경: localhost, 프로덕션: 상대 경로 /api 사용 (nginx 리다이렉트)
+const defaultBase = import.meta.env?.MODE === "production" 
+  ? "/api" 
+  : "http://localhost:8000";
 export const API_BASE_URL = (
   import.meta.env?.VITE_API_BASE_URL || defaultBase
 ).replace(/\/$/, "");
@@ -207,4 +210,14 @@ export function getNoticeHighlights(limit = 3, signal) {
 
 export function refreshRegulationNotices(signal) {
   return http("/be4/notices/refresh", { method: "POST", signal });
+}
+
+// ========== 배송 예측 API ==========
+
+export function predictDelivery(payload, signal) {
+  return http("/api/predict-delivery", {
+    method: "POST",
+    body: payload,
+    signal,
+  });
 }

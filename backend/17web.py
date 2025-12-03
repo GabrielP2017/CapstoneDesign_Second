@@ -62,10 +62,10 @@ app = FastAPI(title="17TRACK Customs Filter Enhanced")
 register_be4(app)
 
 # CORS 설정: 환경 변수에서 프론트엔드 도메인 가져오기
-# 여러 도메인은 쉼표로 구분 (예: "http://localhost:5173,http://54.116.8.74,http://54.116.8.74:80")
+# 여러 도메인은 쉼표로 구분 (예: "http://localhost:5173,https://cargomon.kr")
 FRONTEND_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://localhost:3000,http://54.116.8.74,http://54.116.8.74:80,http://54.116.8.74:443,http://54.116.8.74:3000").split(",")
+    for origin in os.getenv("FRONTEND_ORIGINS", "http://localhost:5173,http://localhost:3000,https://cargomon.kr,http://cargomon.kr").split(",")
     if origin.strip()
 ]
 

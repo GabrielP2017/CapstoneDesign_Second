@@ -12,7 +12,6 @@ import {
 import {
   getRegulationNotices,
   refreshRegulationNotices,
-  API_BASE_URL,
 } from "../../lib/api";
 
 const riskStyles = {
@@ -43,9 +42,9 @@ const isAbsoluteUrl = (url = "") => /^https?:\/\//i.test(url);
 const buildNoticeUrl = (url = "") => {
   if (!url) return "#";
   if (isAbsoluteUrl(url)) return url;
-  const prefix = API_BASE_URL || "";
+  // 상대 경로 사용 (nginx에서 /api로 리다이렉트)
   const separator = url.startsWith("/") ? "" : "/";
-  return `${prefix}${separator}${url}`;
+  return `${separator}${url}`;
 };
 
 function RegulationNoticeBoard() {

@@ -13,7 +13,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import TitleIcon from "../../../img/TitleIcon.png";
 import TitleFont from "../../../img/TitleFont.png";
-import { getRegulationNotices, API_BASE_URL } from "../../lib/api";
+import { getRegulationNotices } from "../../lib/api";
 
 const NOTICE_BADGES = {
   INFO: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-200",
@@ -26,9 +26,9 @@ const isAbsoluteUrl = (url = "") => /^https?:\/\//i.test(url);
 const buildNoticeUrl = (url = "") => {
   if (!url) return "#";
   if (isAbsoluteUrl(url)) return url;
-  const prefix = API_BASE_URL || "";
+  // 상대 경로 사용 (nginx에서 /api로 리다이렉트)
   const separator = url.startsWith("/") ? "" : "/";
-  return `${prefix}${separator}${url}`;
+  return `${separator}${url}`;
 };
 
 const formatRelativeTime = (value) => {

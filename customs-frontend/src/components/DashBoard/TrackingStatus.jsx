@@ -14,45 +14,44 @@ import {
 } from "lucide-react";
 import { saveSearchHistory } from "../../lib/searchHistory";
 import PresetsModal from "../Favorites/PresetsModal";
-import { API_BASE_URL } from "../../lib/api";
+import { 
+  getHealth as apiGetHealth,
+  getNormalizedTracking as apiGetNormalizedTracking,
+  triggerTestWebhook as apiTriggerTestWebhook,
+  predictDelivery,
+} from "../../lib/api";
 
-// API 함수들
-const API_BASE = API_BASE_URL;
-
+// API 함수들 (에러 처리 포함)
 const getHealth = async () => {
-  const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) throw new Error("서버 연결 실패");
-  return res.json();
+  try {
+    return await apiGetHealth();
+  } catch (error) {
+    throw new Error("서버 연결 실패");
+  }
 };
 
 const getNormalizedTracking = async (number) => {
-  const res = await fetch(
-    `${API_BASE}/debug/normalize?number=${encodeURIComponent(number)}`
-  );
-  if (!res.ok) {
-    let message =
-      res.status === 404
-        ? "입력하신 운송장 번호의 통관 정보를 찾을 수 없습니다."
-        : "조회 실패";
-    try {
-      const payload = await res.json();
-      message =
-        payload?.detail || payload?.message || payload?.error || message;
-    } catch {
-      const text = await res.text();
-      if (text) message = text;
+  try {
+    return await apiGetNormalizedTracking(number);
+  } catch (error) {
+    let message = "조회 실패";
+    if (error.message?.includes("404") || error.message?.includes("찾을 수 없습니다")) {
+      message = "입력하신 운송장 번호의 통관 정보를 찾을 수 없습니다.";
+    } else if (error.message) {
+      message = error.message;
     }
     const err = new Error(message);
-    err.status = res.status;
+    err.status = error.status || 500;
     throw err;
   }
-  return res.json();
 };
 
 const triggerTestWebhook = async () => {
-  const res = await fetch(`${API_BASE}/test/webhook`, { method: "POST" });
-  if (!res.ok) throw new Error("샘플 생성 실패");
-  return res.json();
+  try {
+    return await apiTriggerTestWebhook();
+  } catch (error) {
+    throw new Error("샘플 생성 실패");
+  }
 };
 
 // 상태 메타데이터
@@ -545,20 +544,13 @@ export default function TrackingStatus({
     setPredictionError("");
 
     try {
-      const response = await fetch(`${API_BASE}/api/predict-delivery`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tracking_number: number,
-          departure_date: departureDate.toISOString(),
-          hub: sourceDetails?.hub || "ICN",
-          carrier: sourceDetails?.carrier || "Unknown",
-          origin: sourceDetails?.origin_country || "Unknown",
-        }),
+      const data = await predictDelivery({
+        tracking_number: number,
+        departure_date: departureDate.toISOString(),
+        hub: sourceDetails?.hub || "ICN",
+        carrier: sourceDetails?.carrier || "Unknown",
+        origin: sourceDetails?.origin_country || "Unknown",
       });
-
-      if (!response.ok) throw new Error("예상일 API 호출 실패");
-      const data = await response.json();
       if (requestId !== predictionRequestRef.current) return;
       setDetails((prev) => ({
         ...(prev || {}),

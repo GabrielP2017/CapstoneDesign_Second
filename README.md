@@ -64,6 +64,51 @@ FastAPI 앱에는 CORS가 활성화되어 있으며, 프론트엔드의 `Trackin
 
 프론트 : npm run dev
 
+## 프로덕션 배포 가이드
+
+**cargomon.kr 도메인으로 배포하기**
+
+자세한 배포 가이드는 [DEPLOYMENT.md](./DEPLOYMENT.md)를 참고하세요.
+
+### 빠른 시작
+
+1. **백엔드 배포**
+   ```bash
+   cd backend
+   cp .env.example .env  # 환경 변수 설정
+   # .env 파일 편집: SEVENTEENTRACK_API_KEY, FRONTEND_ORIGINS 등
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   uvicorn 17web:app --host 0.0.0.0 --port 8000
+   ```
+
+2. **프론트엔드 빌드**
+   ```bash
+   cd customs-frontend
+   cp .env.production.example .env.production  # 환경 변수 설정
+   # .env.production 파일 편집: VITE_API_BASE_URL 설정
+   npm install
+   npm run build
+   # dist 폴더를 웹 서버에 배포
+   ```
+
+3. **배포 스크립트 사용** (선택사항)
+   ```bash
+   # Linux/Mac
+   chmod +x deploy.sh
+   ./deploy.sh
+   
+   # Windows PowerShell
+   .\deploy.ps1
+   ```
+
+### 주요 설정 사항
+
+- **백엔드 CORS**: `FRONTEND_ORIGINS` 환경 변수에 `https://cargomon.kr` 추가
+- **프론트엔드 API URL**: nginx에서 `/api`로 리다이렉트하는 경우 환경 변수 설정 불필요 (자동으로 상대 경로 `/api` 사용)
+- **Nginx 설정**: `nginx-cargomon.conf.example` 파일 참고
+- **SSL 인증서**: Let's Encrypt 또는 Cloudflare 사용 권장
+
 ## 로컬 배포 가이드
 
 1. 백엔드(FastAPI)
